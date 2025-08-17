@@ -61,24 +61,46 @@ def _read_nonempty_ints(f) -> tuple[List[int] | None, int]:
         return ints, pos
 
 
-def _read_one_node_id(f) -> Optional[int]:
-    """Read next non-empty line and return the first integer, or None on EOF."""
-    s = _read_nonempty_line(f)
-    if s is None:
+def _peek_exact_int_lines(f, n: int) -> Optional[List[int]]:
+    """Return ints from next n non-empty lines iff each line has exactly one int; do not advance file pointer.
+
+    Returns None if any line missing or has 0/multiple integer tokens.
+    """
+    if n <= 0:
+        return []
+    pos = f.tell()
+    vals: List[int] = []
+    try:
+        for _ in range(n):
+            s = _read_nonempty_line(f)
+            if s is None:
+                f.seek(pos)
+                return None
+            ints = _parse_ints(s)
+            if len(ints) != 1:
+                f.seek(pos)
+                return None
+            vals.append(ints[0])
+        f.seek(pos)
+        return vals
+    except Exception:
+        f.seek(pos)
         return None
-    ints = _parse_ints(s)
-    return ints[0] if ints else None
 
 
-def _collect_node_ids_exact_lines(f, count: int) -> List[int]:
-    """Collect exactly 'count' node ids by reading one id per line (first int)."""
-    out: List[int] = []
-    for _ in range(max(0, count)):
-        nid = _read_one_node_id(f)
-        if nid is None:
+def _read_exact_int_lines(f, n: int) -> List[int]:
+    """Consume next n non-empty lines, each must contain exactly one integer; return collected ints (may be < n on EOF)."""
+    vals: List[int] = []
+    for _ in range(max(0, n)):
+        s = _read_nonempty_line(f)
+        if s is None:
             break
-        out.append(nid)
-    return out
+        ints = _parse_ints(s)
+        if len(ints) != 1:
+            # Stop if format deviates; caller decides fallback
+            break
+        vals.append(ints[0])
+    return vals
 
 
 def _parse_one_boundary(
@@ -106,79 +128,41 @@ def _parse_one_boundary(
         return []
     pos_after_header = f.tell()
 
-    # Candidate A: nodes-in-boundary
-    f.seek(pos_after_header)
+    # Deterministic selection: Style A strict, else Style B
     a_nodes: List[int] = []
-    try:
-        if len(header_ints) == 1:
-            H = header_ints[0]
-            # Read until we have at least H node ids; each line may contain multiple ints
-            while len(a_nodes) < H:
-                s = _read_nonempty_line(f)
-                if s is None:
-                    break
-                ints = _parse_ints(s)
-                if ints:
-                    a_nodes.extend(ints)
-            # Trim to exactly H if over-collected
-            a_nodes = a_nodes[: max(0, H)]
-        else:
-            # Treat header ints themselves as node ids (direct list)
-            a_nodes = list(header_ints)
-    except Exception:
-        a_nodes = []
-    pos_after_a = f.tell()
+    if len(header_ints) == 1 and header_ints[0] >= 1:
+        H = header_ints[0]
+        peek = _peek_exact_int_lines(f, H)
+        if peek is not None and len(peek) == H:
+            # Commit read
+            a_nodes = _read_exact_int_lines(f, H)
+            return a_nodes
 
-    # Candidate B: segments
+    # Fallback: Style B (segments)
+    # Reset to after header
     f.seek(pos_after_header)
     b_nodes: List[int] = []
-    try:
-        if len(header_ints) == 1:
-            S = header_ints[0]
-            for _ in range(max(0, S)):
-                seg_ints, _pos = _read_nonempty_ints(f)
-                if seg_ints is None:
-                    break
-                if len(seg_ints) == 1:
-                    N = seg_ints[0]
-                    b_nodes.extend(_collect_node_ids_exact_lines(f, N))
-                else:
-                    # If first token is a count, include inline ids and read remaining
-                    N = seg_ints[0]
-                    inline_ids = seg_ints[1:]
-                    if N > 0 and len(inline_ids) > 0:
-                        b_nodes.extend(inline_ids)
-                        rem = max(0, N - len(inline_ids))
-                        if rem > 0:
-                            b_nodes.extend(_collect_node_ids_exact_lines(f, rem))
-                    else:
-                        # No clear count; treat all as node ids directly for this segment
-                        b_nodes.extend(seg_ints)
+    S = header_ints[0] if (len(header_ints) == 1 and header_ints[0] >= 1) else 1
+    for _ in range(S):
+        line = _read_nonempty_line(f)
+        if line is None:
+            break
+        seg_ints = _parse_ints(line)
+        if len(seg_ints) == 1 and seg_ints[0] >= 1:
+            N = seg_ints[0]
+            # Read exactly N lines, each must be single-int
+            vals = _peek_exact_int_lines(f, N)
+            if vals is not None and len(vals) == N:
+                b_nodes.extend(_read_exact_int_lines(f, N))
+            else:
+                # If malformed, try to salvage by reading as many valid single-int lines as available
+                b_nodes.extend(_read_exact_int_lines(f, N))
+        elif len(seg_ints) >= 1:
+            # Inline node ids for segment
+            b_nodes.extend(seg_ints)
         else:
-            # Header lists node ids directly; treat as a single-segment list
-            b_nodes = list(header_ints)
-    except Exception:
-        b_nodes = []
-    pos_after_b = f.tell()
-
-    # Heuristics to choose candidate
-    def score(nodes: List[int]) -> tuple:
-        length = len(nodes)
-        closed = 1 if (length > 1 and nodes[0] == nodes[-1]) else 0
-        membership = 1 if all((nid in known_node_ids) for nid in nodes) else 0
-        return (length, closed, membership)
-
-    score_a = score(a_nodes)
-    score_b = score(b_nodes)
-
-    if score_b > score_a:
-        f.seek(pos_after_b)
-        return b_nodes
-    if score_a > score_b:
-        f.seek(pos_after_a)
-        return a_nodes
-    # Tie: prefer segments (B)
-    f.seek(pos_after_b)
+            # Malformed/empty, skip
+            continue
     return b_nodes
 
 
@@ -296,12 +280,12 @@ def parse_fort14(path: str | Path) -> Fort14:
         except Exception:
             return Fort14(title, n_nodes, n_elements, nodes, elements, [], [])
 
-        # Optional total nodes line; rewind if not a simple int
+        # Optional total nodes line; if present and simple int, tentatively consume but allow fallback
         pos_after_n_open = f.tell()
+        open_total_nodes: Optional[int] = None
         ints, pos_before = _read_nonempty_ints(f)
         if ints is not None and len(ints) == 1:
-            # total nodes hint; we don't rely on it for parsing selection
-            pass
+            open_total_nodes = ints[0]
         else:
             if ints is not None:
                 f.seek(pos_before)
@@ -311,9 +295,20 @@ def parse_fort14(path: str | Path) -> Fort14:
         # Parse each open boundary independently with dual strategy
         known_ids = {nid for (nid, _, _, _) in nodes}
         open_boundaries: List[List[int]] = []
-        for _ in range(max(0, n_open)):
+        if n_open == 1 and open_total_nodes is not None:
+            # Remember position right after optional total
+            pos_after_total = f.tell()
             b = _parse_one_boundary(f, known_ids)
+            if len(b) < open_total_nodes:
+                # Rewind and parse treating the consumed total as boundary header
+                f.seek(pos_after_n_open)
+                open_total_nodes = None
+                b = _parse_one_boundary(f, known_ids)
             open_boundaries.append(b)
+        else:
+            for _ in range(max(0, n_open)):
+                b = _parse_one_boundary(f, known_ids)
+                open_boundaries.append(b)
 
         # --- Land boundaries (robust) ---
         n_land_line = _read_nonempty_line(f)
@@ -325,9 +320,10 @@ def parse_fort14(path: str | Path) -> Fort14:
             return Fort14(title, n_nodes, n_elements, nodes, elements, open_boundaries, [])
 
         pos_after_n_land = f.tell()
+        land_total_nodes: Optional[int] = None
         ints, pos_before = _read_nonempty_ints(f)
         if ints is not None and len(ints) == 1:
-            pass
+            land_total_nodes = ints[0]
         else:
             if ints is not None:
                 f.seek(pos_before)
@@ -335,9 +331,16 @@ def parse_fort14(path: str | Path) -> Fort14:
                 f.seek(pos_after_n_land)
 
         land_boundaries: List[List[int]] = []
-        for _ in range(max(0, n_land)):
+        if n_land == 1 and land_total_nodes is not None:
             b = _parse_one_boundary(f, known_ids)
+            if len(b) < land_total_nodes:
+                f.seek(pos_after_n_land)
+                b = _parse_one_boundary(f, known_ids)
             land_boundaries.append(b)
+        else:
+            for _ in range(max(0, n_land)):
+                b = _parse_one_boundary(f, known_ids)
+                land_boundaries.append(b)
 
         return Fort14(title, n_nodes, n_elements, nodes, elements, open_boundaries, land_boundaries)
 
