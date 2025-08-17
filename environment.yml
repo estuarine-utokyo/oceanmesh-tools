@@ -1,0 +1,28 @@
+name: omtool
+channels:
+  - conda-forge
+dependencies:
+  - python>=3.12
+  - pip
+
+  # Core plotting
+  - matplotlib>=3.8
+
+  # Geospatial stack (condaで入れるのが安定)
+  - shapely>=2.0
+  - pyproj>=3.6
+  - gdal            # rasterio/fionaの土台（バージョンは解決に任せる）
+  - rasterio>=1.3
+  - fiona>=1.9
+  - geopandas>=0.14
+  - xarray>=2024.1
+  - cartopy>=0.22
+  - hvplot>=0.9
+  - pandas          # geopandasの依存
+  - numpy
+  - scipy
+
+  # CLI/Dev (任意)
+  - pip:
+      - pytest>=7.4
+
