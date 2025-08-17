@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup micromamba
+        uses: mamba-org/setup-micromamba@v1
+        with:
+          environment-file: environment.yml
+          environment-name: omtool
+          cache-environment: true
+          cache-downloads: true
+          micromamba-version: '1.5.8'
+
+      - name: Show env
+        shell: bash -l {0}
+        run: |
+          micromamba info
+          python -V
+
+      - name: Install package (editable)
+        shell: bash -l {0}
+        run: |
+          pip install -e .
+
+      - name: Run tests
+        shell: bash -l {0}
+        run: |
+          pytest -q
+

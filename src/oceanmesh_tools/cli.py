@@ -9,7 +9,7 @@ from typing import Dict, List, Optional, Tuple
 from .config import load_config, region_paths
 from .io.fort14 import mesh_bbox_from_fort14, parse_fort14
 from .scan.matlab_inputs import scan_matlab_scripts
-from .scan.resolve_paths import resolve_candidates
+from .scan.resolve_paths import resolve_candidates, pick_best_by_iou
 from .plot.viz import (
     plot_bathymetry_contours,
     plot_bathymetry_filled,
@@ -64,6 +64,9 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 extra_shp_paths=extra_shp,
                 extra_dem_paths=extra_dem,
             )
+            shp_res, dem_res = (None, None)
+            if key_path:
+                shp_res, dem_res = pick_best_by_iou(key_path, shp_cands, dem_cands)
             # Merge if key already exists
             if key in catalog:
                 entry = catalog[key]
@@ -72,12 +75,19 @@ def cmd_scan(args: argparse.Namespace) -> int:
                 entry["script_path"] = entry["script_paths"][0]
                 entry["shp_candidates"] = sorted(list(set(entry["shp_candidates"]) | set(map(_str_path, shp_cands))))
                 entry["dem_candidates"] = sorted(list(set(entry["dem_candidates"]) | set(map(_str_path, dem_cands))))
+                if shp_res is not None:
+                    entry["shp_resolved"] = _str_path(shp_res)
+                if dem_res is not None:
+                    entry["dem_resolved"] = _str_path(dem_res)
             else:
                 catalog[key] = {
+                    "fort14_path": _str_path(key_path) if key_path else key,
                     "script_path": _str_path(si.script_path),
                     "script_paths": [_str_path(si.script_path)],
                     "shp_candidates": list(map(_str_path, shp_cands)),
                     "dem_candidates": list(map(_str_path, dem_cands)),
+                    "shp_resolved": _str_path(shp_res) if shp_res else None,
+                    "dem_resolved": _str_path(dem_res) if dem_res else None,
                 }
 
     out_path = Path(args.out).resolve()
@@ -189,7 +199,11 @@ def cmd_viz(args: argparse.Namespace) -> int:
     else:
         print("No shapefile detected; skipping coastline overlay")
 
-    print(f"Saved figures to {outdir}")
+    print("\nSummary:")
+    print(f"  fort14: {fort14}")
+    print(f"  DEM: {dem_path if dem_path else 'None'}")
+    print(f"  Shapefile: {shp_path if shp_path else 'None'}")
+    print(f"  Output: {outdir}")
     return 0
 
 

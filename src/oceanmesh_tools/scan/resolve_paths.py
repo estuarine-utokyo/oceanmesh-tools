@@ -116,6 +116,27 @@ def _overlap_score(a: Tuple[float, float, float, float], b: Tuple[float, float, 
     return inter / area_a if area_a > 0 else 0.0
 
 
+def _iou(a: Tuple[float, float, float, float], b: Tuple[float, float, float, float]) -> float:
+    ax1, ay1, ax2, ay2 = a
+    bx1, by1, bx2, by2 = b
+    x1 = max(ax1, bx1)
+    y1 = max(ay1, by1)
+    x2 = min(ax2, bx2)
+    y2 = min(ay2, by2)
+    inter = max(0.0, x2 - x1) * max(0.0, y2 - y1)
+    area_a = max(0.0, (ax2 - ax1)) * max(0.0, (ay2 - ay1))
+    area_b = max(0.0, (bx2 - bx1)) * max(0.0, (by2 - by1))
+    denom = area_a + area_b - inter
+    return inter / denom if denom > 0 else 0.0
+
+
+def bbox_for_path(path: Path) -> Optional[Tuple[float, float, float, float]]:
+    if path.suffix.lower() == ".shp":
+        return _bbox_from_shapefile(path)
+    # raster formats
+    return _bbox_from_raster(path)
+
+
 def resolve_candidates(
     mesh_fort14: Optional[Path],
     shp_hints: Sequence[str],
@@ -176,3 +197,38 @@ def resolve_candidates(
 
     return shp_cands, dem_cands
 
+
+def pick_best_by_iou(
+    mesh_fort14: Path,
+    shp_cands: List[Path],
+    dem_cands: List[Path],
+) -> Tuple[Optional[Path], Optional[Path]]:
+    """Pick best shapefile and DEM by IoU with the mesh bbox.
+
+    Returns (best_shp, best_dem); may be None if no candidates.
+    """
+    try:
+        mbbox = mesh_bbox_from_fort14(mesh_fort14)
+    except Exception:
+        mbbox = None  # type: ignore
+    best_shp = None
+    best_dem = None
+    if mbbox:
+        best_s = -1.0
+        for p in shp_cands:
+            b = bbox_for_path(p)
+            s = _iou(mbbox, b) if b else 0.0
+            if s > best_s:
+                best_s = s
+                best_shp = p
+        best_s = -1.0
+        for p in dem_cands:
+            b = bbox_for_path(p)
+            s = _iou(mbbox, b) if b else 0.0
+            if s > best_s:
+                best_s = s
+                best_dem = p
+    else:
+        best_shp = shp_cands[0] if shp_cands else None
+        best_dem = dem_cands[0] if dem_cands else None
+    return best_shp, best_dem
