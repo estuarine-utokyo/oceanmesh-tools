@@ -106,6 +106,7 @@ def _read_exact_int_lines(f, n: int) -> List[int]:
 def _parse_one_boundary(
     f,
     known_node_ids: Set[int],
+    total_hint: Optional[int] = None,
 ) -> List[int]:
     """Parse a single boundary using dual strategies and heuristics.
 
@@ -128,21 +129,21 @@ def _parse_one_boundary(
         return []
     pos_after_header = f.tell()
 
-    # Deterministic selection: Style A strict, else Style B
-    a_nodes: List[int] = []
+    # Build candidates without committing pointer
+    a_nodes: Optional[List[int]] = None
+    a_H = None
     if len(header_ints) == 1 and header_ints[0] >= 1:
         H = header_ints[0]
         peek = _peek_exact_int_lines(f, H)
         if peek is not None and len(peek) == H:
-            # Commit read
-            a_nodes = _read_exact_int_lines(f, H)
-            return a_nodes
+            a_nodes = list(peek)
+            a_H = H
 
-    # Fallback: Style B (segments)
-    # Reset to after header
+    # Candidate B: peek by simulating read and rewinding
     f.seek(pos_after_header)
     b_nodes: List[int] = []
     S = header_ints[0] if (len(header_ints) == 1 and header_ints[0] >= 1) else 1
+    pos_before_b = f.tell()
     for _ in range(S):
         line = _read_nonempty_line(f)
         if line is None:
@@ -150,20 +151,57 @@ def _parse_one_boundary(
         seg_ints = _parse_ints(line)
         if len(seg_ints) == 1 and seg_ints[0] >= 1:
             N = seg_ints[0]
-            # Read exactly N lines, each must be single-int
             vals = _peek_exact_int_lines(f, N)
             if vals is not None and len(vals) == N:
-                b_nodes.extend(_read_exact_int_lines(f, N))
+                b_nodes.extend(vals)
+                # advance peeked
+                _ = _read_exact_int_lines(f, N)
             else:
-                # If malformed, try to salvage by reading as many valid single-int lines as available
+                # salvage: read as many single-int lines as available
                 b_nodes.extend(_read_exact_int_lines(f, N))
         elif len(seg_ints) >= 1:
-            # Inline node ids for segment
             b_nodes.extend(seg_ints)
         else:
-            # Malformed/empty, skip
             continue
-    return b_nodes
+    # Rewind to after header; we will commit by re-reading chosen path
+    f.seek(pos_after_header)
+
+    # Selection with total_hint awareness
+    if total_hint is not None:
+        if a_nodes is not None and len(a_nodes) == total_hint and len(b_nodes) != total_hint:
+            # Commit A
+            return _read_exact_int_lines(f, a_H or 0)
+        if len(b_nodes) == total_hint and (a_nodes is None or len(a_nodes) != total_hint):
+            # Commit B: re-read to consume
+            nodes_out: List[int] = []
+            S = header_ints[0] if (len(header_ints) == 1 and header_ints[0] >= 1) else 1
+            for _ in range(S):
+                line = _read_nonempty_line(f)
+                if line is None:
+                    break
+                seg_ints = _parse_ints(line)
+                if len(seg_ints) == 1 and seg_ints[0] >= 1:
+                    nodes_out.extend(_read_exact_int_lines(f, seg_ints[0]))
+                elif len(seg_ints) >= 1:
+                    nodes_out.extend(seg_ints)
+            return nodes_out
+
+    # Default deterministic: prefer A if available, else B
+    if a_nodes is not None:
+        return _read_exact_int_lines(f, a_H or 0)
+    # Commit B
+    nodes_out: List[int] = []
+    S = header_ints[0] if (len(header_ints) == 1 and header_ints[0] >= 1) else 1
+    for _ in range(S):
+        line = _read_nonempty_line(f)
+        if line is None:
+            break
+        seg_ints = _parse_ints(line)
+        if len(seg_ints) == 1 and seg_ints[0] >= 1:
+            nodes_out.extend(_read_exact_int_lines(f, seg_ints[0]))
+        elif len(seg_ints) >= 1:
+            nodes_out.extend(seg_ints)
+    return nodes_out
 
 
 def _parse_boundary_group_nodes_in_boundary(f, n_boundaries: int, total_nodes_hint: int | None) -> List[List[int]] | None:
@@ -280,7 +318,7 @@ def parse_fort14(path: str | Path) -> Fort14:
         except Exception:
             return Fort14(title, n_nodes, n_elements, nodes, elements, [], [])
 
-        # Optional total nodes line; if present and simple int, tentatively consume but allow fallback
+        # Optional total nodes line; if present and simple int, consume; else rewind
         pos_after_n_open = f.tell()
         open_total_nodes: Optional[int] = None
         ints, pos_before = _read_nonempty_ints(f)
@@ -295,20 +333,9 @@ def parse_fort14(path: str | Path) -> Fort14:
         # Parse each open boundary independently with dual strategy
         known_ids = {nid for (nid, _, _, _) in nodes}
         open_boundaries: List[List[int]] = []
-        if n_open == 1 and open_total_nodes is not None:
-            # Remember position right after optional total
-            pos_after_total = f.tell()
-            b = _parse_one_boundary(f, known_ids)
-            if len(b) < open_total_nodes:
-                # Rewind and parse treating the consumed total as boundary header
-                f.seek(pos_after_n_open)
-                open_total_nodes = None
-                b = _parse_one_boundary(f, known_ids)
+        for _ in range(max(0, n_open)):
+            b = _parse_one_boundary(f, known_ids, open_total_nodes)
             open_boundaries.append(b)
-        else:
-            for _ in range(max(0, n_open)):
-                b = _parse_one_boundary(f, known_ids)
-                open_boundaries.append(b)
 
         # --- Land boundaries (robust) ---
         n_land_line = _read_nonempty_line(f)
@@ -331,16 +358,9 @@ def parse_fort14(path: str | Path) -> Fort14:
                 f.seek(pos_after_n_land)
 
         land_boundaries: List[List[int]] = []
-        if n_land == 1 and land_total_nodes is not None:
-            b = _parse_one_boundary(f, known_ids)
-            if len(b) < land_total_nodes:
-                f.seek(pos_after_n_land)
-                b = _parse_one_boundary(f, known_ids)
+        for _ in range(max(0, n_land)):
+            b = _parse_one_boundary(f, known_ids, land_total_nodes)
             land_boundaries.append(b)
-        else:
-            for _ in range(max(0, n_land)):
-                b = _parse_one_boundary(f, known_ids)
-                land_boundaries.append(b)
 
         return Fort14(title, n_nodes, n_elements, nodes, elements, open_boundaries, land_boundaries)
 
