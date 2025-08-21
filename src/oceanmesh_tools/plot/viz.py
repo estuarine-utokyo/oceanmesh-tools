@@ -69,11 +69,20 @@ def _build_open_boundary_segments(mesh: Fort14) -> List[np.ndarray]:
     """
     id_to_xy = {nid: (x, y) for nid, x, y, _ in mesh.nodes}
     segments: List[np.ndarray] = []
+    prev_last: Optional[np.ndarray] = None
     for b in mesh.open_boundaries:
         xs = [id_to_xy[n][0] for n in b if n in id_to_xy]
         ys = [id_to_xy[n][1] for n in b if n in id_to_xy]
         if len(xs) >= 2:
-            segments.append(np.column_stack([np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)]))
+            arr = np.column_stack([np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)])
+            if prev_last is not None and arr.shape[0] >= 1 and np.allclose(arr[0], prev_last):
+                arr = arr[1:, :]
+            if arr.shape[0] >= 2:
+                segments.append(arr)
+            if arr.shape[0] >= 1:
+                prev_last = arr[-1].copy()
+            else:
+                prev_last = None
     return segments
 
 

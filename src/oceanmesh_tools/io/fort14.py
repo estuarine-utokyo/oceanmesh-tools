@@ -333,17 +333,15 @@ def parse_fort14(path: str | Path) -> Fort14:
         else:
             f.seek(pos_after_n_open)
 
+        # If a total-nodes line exists, consume it once before boundaries
+        if open_total_nodes is not None:
+            _ = _read_nonempty_line(f)
+
         # Parse each open boundary independently with dual strategy
         known_ids = {nid for (nid, _, _, _) in nodes}
         open_boundaries: List[List[int]] = []
         if n_open == 1:
-            # First attempt with header after total (if any)
-            pos_before_boundary = f.tell()
             b = _parse_one_boundary(f, known_ids, open_total_nodes)
-            if open_total_nodes is not None and len(b) != open_total_nodes and open_pos_before_total is not None:
-                # Retry treating the 'total' line as the boundary header
-                f.seek(open_pos_before_total)
-                b = _parse_one_boundary(f, known_ids, None)
             open_boundaries.append(b)
         else:
             for _ in range(max(0, n_open)):
@@ -373,12 +371,13 @@ def parse_fort14(path: str | Path) -> Fort14:
         else:
             f.seek(pos_after_n_land)
 
+        # If a total-nodes line exists, consume it once before land boundaries
+        if land_total_nodes is not None:
+            _ = _read_nonempty_line(f)
+
         land_boundaries: List[List[int]] = []
         if n_land == 1:
             b = _parse_one_boundary(f, known_ids, land_total_nodes)
-            if land_total_nodes is not None and len(b) != land_total_nodes and land_pos_before_total is not None:
-                f.seek(land_pos_before_total)
-                b = _parse_one_boundary(f, known_ids, None)
             land_boundaries.append(b)
         else:
             for _ in range(max(0, n_land)):
