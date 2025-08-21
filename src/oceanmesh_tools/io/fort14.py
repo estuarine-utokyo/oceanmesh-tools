@@ -144,25 +144,34 @@ def _parse_one_boundary(
     b_nodes: List[int] = []
     S = header_ints[0] if (len(header_ints) == 1 and header_ints[0] >= 1) else 1
     pos_before_b = f.tell()
-    for _ in range(S):
-        line = _read_nonempty_line(f)
-        if line is None:
-            break
-        seg_ints = _parse_ints(line)
-        if len(seg_ints) == 1 and seg_ints[0] >= 1:
-            N = seg_ints[0]
-            vals = _peek_exact_int_lines(f, N)
-            if vals is not None and len(vals) == N:
-                b_nodes.extend(vals)
-                # advance peeked
-                _ = _read_exact_int_lines(f, N)
-            else:
-                # salvage: read as many single-int lines as available
-                b_nodes.extend(_read_exact_int_lines(f, N))
-        elif len(seg_ints) >= 1:
-            b_nodes.extend(seg_ints)
+    if total_hint is not None and S == 1:
+        # Special-case: some files with 1 segment provide nodes directly one-per-line
+        peek_all = _peek_exact_int_lines(f, total_hint)
+        if peek_all is not None and len(peek_all) == total_hint:
+            b_nodes = list(peek_all)
         else:
-            continue
+            # fallback to standard peek below
+            pass
+    if not b_nodes:
+        for _ in range(S):
+            line = _read_nonempty_line(f)
+            if line is None:
+                break
+            seg_ints = _parse_ints(line)
+            if len(seg_ints) == 1 and seg_ints[0] >= 1:
+                N = seg_ints[0]
+                vals = _peek_exact_int_lines(f, N)
+                if vals is not None and len(vals) == N:
+                    b_nodes.extend(vals)
+                    # advance peeked
+                    _ = _read_exact_int_lines(f, N)
+                else:
+                    # salvage: read as many single-int lines as available
+                    b_nodes.extend(_read_exact_int_lines(f, N))
+            elif len(seg_ints) >= 1:
+                b_nodes.extend(seg_ints)
+            else:
+                continue
     # Rewind to after header; we will commit by re-reading chosen path
     f.seek(pos_after_header)
 
@@ -175,15 +184,24 @@ def _parse_one_boundary(
             # Commit B: re-read to consume
             nodes_out: List[int] = []
             S = header_ints[0] if (len(header_ints) == 1 and header_ints[0] >= 1) else 1
-            for _ in range(S):
-                line = _read_nonempty_line(f)
-                if line is None:
-                    break
-                seg_ints = _parse_ints(line)
-                if len(seg_ints) == 1 and seg_ints[0] >= 1:
-                    nodes_out.extend(_read_exact_int_lines(f, seg_ints[0]))
-                elif len(seg_ints) >= 1:
-                    nodes_out.extend(seg_ints)
+            if S == 1:
+                # Read exactly total_hint integers across subsequent lines
+                while len(nodes_out) < total_hint:
+                    ints_line, _ = _read_nonempty_ints(f)
+                    if ints_line is None:
+                        break
+                    nodes_out.extend(ints_line)
+                nodes_out = nodes_out[:total_hint]
+            else:
+                for _ in range(S):
+                    line = _read_nonempty_line(f)
+                    if line is None:
+                        break
+                    seg_ints = _parse_ints(line)
+                    if len(seg_ints) == 1 and seg_ints[0] >= 1:
+                        nodes_out.extend(_read_exact_int_lines(f, seg_ints[0]))
+                    elif len(seg_ints) >= 1:
+                        nodes_out.extend(seg_ints)
             return nodes_out
 
     # Default deterministic: prefer A if available, else B
@@ -192,15 +210,23 @@ def _parse_one_boundary(
     # Commit B
     nodes_out: List[int] = []
     S = header_ints[0] if (len(header_ints) == 1 and header_ints[0] >= 1) else 1
-    for _ in range(S):
-        line = _read_nonempty_line(f)
-        if line is None:
-            break
-        seg_ints = _parse_ints(line)
-        if len(seg_ints) == 1 and seg_ints[0] >= 1:
-            nodes_out.extend(_read_exact_int_lines(f, seg_ints[0]))
-        elif len(seg_ints) >= 1:
-            nodes_out.extend(seg_ints)
+    if total_hint is not None and S == 1:
+        while len(nodes_out) < total_hint:
+            ints_line, _ = _read_nonempty_ints(f)
+            if ints_line is None:
+                break
+            nodes_out.extend(ints_line)
+        nodes_out = nodes_out[: total_hint]
+    else:
+        for _ in range(S):
+            line = _read_nonempty_line(f)
+            if line is None:
+                break
+            seg_ints = _parse_ints(line)
+            if len(seg_ints) == 1 and seg_ints[0] >= 1:
+                nodes_out.extend(_read_exact_int_lines(f, seg_ints[0]))
+            elif len(seg_ints) >= 1:
+                nodes_out.extend(seg_ints)
     return nodes_out
 
 
