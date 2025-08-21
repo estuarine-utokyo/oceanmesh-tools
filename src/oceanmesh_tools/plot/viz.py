@@ -360,24 +360,87 @@ def _plot_lines(ax, lines: List[np.ndarray], color: str = "C0", lw: float = 0.5,
     ax.add_collection(lc)
 
 
+def make_valid(geom):  # pragma: no cover - depends on shapely version
+    try:
+        from shapely.validation import make_valid as _mv  # type: ignore
+        return _mv(geom)
+    except Exception:
+        try:
+            return geom.buffer(0)
+        except Exception:
+            return geom
+
+
+def iter_boundaries(geom, include_holes: bool = False):  # pragma: no cover - thin shim over shapely
+    try:
+        from shapely.geometry import (
+            Polygon,
+            MultiPolygon,
+            LineString,
+            MultiLineString,
+            GeometryCollection,
+        )  # type: ignore
+    except Exception:
+        return
+    if geom is None or getattr(geom, "is_empty", False):
+        return
+    if isinstance(geom, Polygon):
+        g = make_valid(geom)
+        if getattr(g, "exterior", None):
+            yield list(g.exterior.coords)
+        if include_holes and getattr(g, "interiors", None):
+            for r in g.interiors:
+                yield list(r.coords)
+    elif isinstance(geom, MultiPolygon):
+        for g in geom.geoms:
+            yield from iter_boundaries(g, include_holes)
+    elif isinstance(geom, LineString):
+        yield list(geom.coords)
+    elif isinstance(geom, MultiLineString):
+        for ln in geom.geoms:
+            yield list(ln.coords)
+    elif isinstance(geom, GeometryCollection):
+        for g in geom.geometries:
+            yield from iter_boundaries(g, include_holes)
+
+
+def plot_geoms_as_lines(ax, geoms, include_holes: bool = False, **kw):
+    for geom in geoms:
+        for coords in iter_boundaries(geom, include_holes):
+            if not coords:
+                continue
+            arr = np.asarray(coords)
+            if arr.ndim == 2 and arr.shape[0] >= 2:
+                ax.plot(arr[:, 0], arr[:, 1], **kw)
+
+
 def plot_coastline_overlay(
     shp_path: Path,
     mesh_bbox: Tuple[float, float, float, float],
     outdir: Path,
     include_holes: bool = False,
+    target_crs: Optional[str] = None,
 ) -> Path:
     if gpd is None:
         raise RuntimeError("geopandas is required to plot coastline overlay")
     _ensure_outdir(outdir)
     gdf = gpd.read_file(shp_path)  # type: ignore
     try:
-        gdf = gdf.to_crs(epsg=4326)  # type: ignore
+        if target_crs:
+            gdf = gdf.to_crs(target_crs)  # type: ignore
+        else:
+            # Default to geographic if possible
+            gdf = gdf.to_crs(epsg=4326)  # type: ignore
     except Exception:
         pass
     fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
-    # Draw as separate polylines to avoid connectors across parts
-    segments = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
-    _plot_lines(ax, segments, color="C0", lw=0.5, zorder=2)
+    # Draw each boundary independently; no implicit joins
+    try:
+        plot_geoms_as_lines(ax, gdf.geometry, include_holes=include_holes, color="C0", linewidth=0.6, zorder=2)  # type: ignore
+    except Exception:
+        # Fallback via LineCollection if plotting as individual lines fails
+        segments = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
+        _plot_lines(ax, segments, color="C0", lw=0.5, zorder=2)
     ax.set_title("Coastline Overlay")
     ax.set_xlabel("Lon/X")
     ax.set_ylabel("Lat/Y")

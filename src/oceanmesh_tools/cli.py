@@ -456,7 +456,13 @@ def cmd_viz(args: argparse.Namespace) -> int:
     if shp_path and shp_path.exists():
         try:
             bbox = mesh_bbox_from_fort14(fort14)
-            plot_coastline_overlay(shp_path, bbox, outdir, include_holes=getattr(args, "coast_include_holes", False))
+            plot_coastline_overlay(
+                shp_path,
+                bbox,
+                outdir,
+                include_holes=getattr(args, "coast_include_holes", False),
+                target_crs=getattr(args, "crs", None),
+            )
         except Exception as e:
             print(f"Coastline overlay skipped: {e}")
     else:

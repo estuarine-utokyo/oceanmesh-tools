@@ -18,7 +18,7 @@ jobs:
           environment-name: omtool
           cache-environment: true
           cache-downloads: true
-          micromamba-version: '1.5.8'
+          micromamba-version: 'latest'
 
       - name: Show env
         shell: bash -l {0}
@@ -35,4 +35,3 @@ jobs:
         shell: bash -l {0}
         run: |
           pytest -q
-

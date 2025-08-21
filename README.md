@@ -70,6 +70,11 @@ Fixes and Notes
 - Coastline overlay: previously only a single outer ring could be drawn for some shapefiles, hiding islands. The plotter now iterates polygon boundaries and can include holes with `--coast-include-holes`.
 - Open boundaries: previously disjoint segments could be connected by long straight chords. The plotter now splits per-boundary polylines on large spatial gaps to avoid spurious connections.
 
+Known Pitfalls
+
+- Shapefile validity: invalid polygons may render oddly. The coastline plotter attempts to "make valid" geometries or uses a zero-width buffer fallback. If artifacts persist, repair the shapefile in a GIS tool and try again.
+- CRS handling: if the shapefile CRS differs from the mesh coordinate system, provide an explicit CRS via `--crs` so the coastline is reprojected accordingly.
+
 See also the quickstart notebook in `notebooks/00_quickstart.ipynb`.
 
 **Usage Examples**
