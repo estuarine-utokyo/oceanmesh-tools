@@ -323,14 +323,15 @@ def parse_fort14(path: str | Path) -> Fort14:
         open_total_nodes: Optional[int] = None
         open_pos_before_total = None
         ints, pos_before = _read_nonempty_ints(f)
+        # Always rewind after peeking; do not consume here
         if ints is not None and len(ints) == 1:
             open_total_nodes = ints[0]
             open_pos_before_total = pos_before
+        # Rewind to position after n_open to let boundary parsing consume correctly
+        if ints is not None:
+            f.seek(pos_before)
         else:
-            if ints is not None:
-                f.seek(pos_before)
-            else:
-                f.seek(pos_after_n_open)
+            f.seek(pos_after_n_open)
 
         # Parse each open boundary independently with dual strategy
         known_ids = {nid for (nid, _, _, _) in nodes}
@@ -362,14 +363,15 @@ def parse_fort14(path: str | Path) -> Fort14:
         land_total_nodes: Optional[int] = None
         land_pos_before_total = None
         ints, pos_before = _read_nonempty_ints(f)
+        # Always rewind after peeking; do not consume here
         if ints is not None and len(ints) == 1:
             land_total_nodes = ints[0]
             land_pos_before_total = pos_before
+        # Rewind to position after n_land to let boundary parsing consume correctly
+        if ints is not None:
+            f.seek(pos_before)
         else:
-            if ints is not None:
-                f.seek(pos_before)
-            else:
-                f.seek(pos_after_n_land)
+            f.seek(pos_after_n_land)
 
         land_boundaries: List[List[int]] = []
         if n_land == 1:
