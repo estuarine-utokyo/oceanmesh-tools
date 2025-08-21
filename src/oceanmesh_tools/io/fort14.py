@@ -177,32 +177,47 @@ def _parse_one_boundary(
 
     # Selection with total_hint awareness
     if total_hint is not None:
+        S = header_ints[0] if (len(header_ints) == 1 and header_ints[0] >= 1) else 1
+        if S == 1:
+            # Most robust for tiny files: read exactly total_hint node-ids across lines
+            nodes_out: List[int] = []
+            while len(nodes_out) < total_hint:
+                ints_line, _ = _read_nonempty_ints(f)
+                if ints_line is None:
+                    break
+                nodes_out.extend(ints_line)
+            return nodes_out[: total_hint]
+        # Otherwise, prefer candidate that matches total_hint; fall back to longer candidate
         if a_nodes is not None and len(a_nodes) == total_hint and len(b_nodes) != total_hint:
-            # Commit A
             return _read_exact_int_lines(f, a_H or 0)
         if len(b_nodes) == total_hint and (a_nodes is None or len(a_nodes) != total_hint):
             # Commit B: re-read to consume
             nodes_out: List[int] = []
-            S = header_ints[0] if (len(header_ints) == 1 and header_ints[0] >= 1) else 1
-            if S == 1:
-                # Read exactly total_hint integers across subsequent lines
-                while len(nodes_out) < total_hint:
-                    ints_line, _ = _read_nonempty_ints(f)
-                    if ints_line is None:
-                        break
-                    nodes_out.extend(ints_line)
-                nodes_out = nodes_out[:total_hint]
-            else:
-                for _ in range(S):
-                    line = _read_nonempty_line(f)
-                    if line is None:
-                        break
-                    seg_ints = _parse_ints(line)
-                    if len(seg_ints) == 1 and seg_ints[0] >= 1:
-                        nodes_out.extend(_read_exact_int_lines(f, seg_ints[0]))
-                    elif len(seg_ints) >= 1:
-                        nodes_out.extend(seg_ints)
+            for _ in range(S):
+                line = _read_nonempty_line(f)
+                if line is None:
+                    break
+                seg_ints = _parse_ints(line)
+                if len(seg_ints) == 1 and seg_ints[0] >= 1:
+                    nodes_out.extend(_read_exact_int_lines(f, seg_ints[0]))
+                elif len(seg_ints) >= 1:
+                    nodes_out.extend(seg_ints)
             return nodes_out
+        # Fallback: pick longer candidate (favor B when tie)
+        if b_nodes and (a_nodes is None or len(b_nodes) >= len(a_nodes)):
+            nodes_out: List[int] = []
+            for _ in range(S):
+                line = _read_nonempty_line(f)
+                if line is None:
+                    break
+                seg_ints = _parse_ints(line)
+                if len(seg_ints) == 1 and seg_ints[0] >= 1:
+                    nodes_out.extend(_read_exact_int_lines(f, seg_ints[0]))
+                elif len(seg_ints) >= 1:
+                    nodes_out.extend(seg_ints)
+            return nodes_out
+        if a_nodes is not None:
+            return _read_exact_int_lines(f, a_H or 0)
 
     # Default deterministic: prefer A if available, else B
     if a_nodes is not None:
