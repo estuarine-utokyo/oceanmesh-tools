@@ -8,6 +8,8 @@ authors = [{ name = "oceanmesh-tools" }]
 
 dependencies = [
   "matplotlib>=3.8",   # Py3.12世代に足並み
+  "xarray>=2023.1",
+  "netCDF4",
 ]
 
 [project.optional-dependencies]

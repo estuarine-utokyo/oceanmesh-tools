@@ -249,7 +249,7 @@ def _resolve_from_catalog(catalog: Dict, fort14_path: Path) -> Tuple[Optional[Pa
             except Exception:
                 continue
     if not entry:
-        # Last resort: unique basename match across entries
+        # Do not silently fallback by basename; this is ambiguous across environments
         candidates = []
         for k, v in catalog.items():
             try:
@@ -258,13 +258,11 @@ def _resolve_from_catalog(catalog: Dict, fort14_path: Path) -> Tuple[Optional[Pa
                 k_base = Path(k).stem
             if k_base == base:
                 candidates.append(v)
-        if len(candidates) == 1:
-            print(f"[catalog] Using unique basename fallback for '{base}'. Consider re-scanning to store absolute keys.")
-            entry = candidates[0]
-        elif len(candidates) > 1:
-            raise RuntimeError(f"Ambiguous basename '{base}' in catalog; multiple entries share this name. Use absolute --fort14 or re-scan.")
-        else:
-            return None, None, [], []
+        if candidates:
+            raise RuntimeError(
+                f"Ambiguous basename '{base}' in catalog; use absolute --fort14 or re-scan to normalize keys."
+            )
+        return None, None, [], []
     # Prefer resolved paths when available, otherwise first candidate
     shp = None
     dem = None

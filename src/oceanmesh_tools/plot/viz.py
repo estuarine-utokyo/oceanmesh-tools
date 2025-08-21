@@ -63,21 +63,17 @@ def _split_polyline_on_gaps(arr: np.ndarray) -> List[np.ndarray]:
 
 
 def _build_open_boundary_segments(mesh: Fort14) -> List[np.ndarray]:
-    """Return list of (N,2) arrays per open-boundary path, avoiding cross-chords.
+    """Return list of (N,2) arrays per open-boundary polyline (one per boundary).
 
-    The fort.14 may flatten multiple open-boundary segments into one list.
-    We reconstruct multiple polylines by splitting on large spatial gaps while
-    preserving original node order. Separate boundary ids are never connected.
+    Preserves provided node order and does not join boundaries or infer splits.
     """
     id_to_xy = {nid: (x, y) for nid, x, y, _ in mesh.nodes}
     segments: List[np.ndarray] = []
     for b in mesh.open_boundaries:
-        coords = [(id_to_xy[n][0], id_to_xy[n][1]) for n in b if n in id_to_xy]
-        if len(coords) < 2:
-            continue
-        arr = np.asarray(coords, dtype=float)
-        parts = _split_polyline_on_gaps(arr)
-        segments.extend(parts)
+        xs = [id_to_xy[n][0] for n in b if n in id_to_xy]
+        ys = [id_to_xy[n][1] for n in b if n in id_to_xy]
+        if len(xs) >= 2:
+            segments.append(np.column_stack([np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)]))
     return segments
 
 
