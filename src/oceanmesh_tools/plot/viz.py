@@ -73,15 +73,18 @@ def _build_open_boundary_segments(mesh: Fort14) -> List[np.ndarray]:
     for b in mesh.open_boundaries:
         xs = [id_to_xy[n][0] for n in b if n in id_to_xy]
         ys = [id_to_xy[n][1] for n in b if n in id_to_xy]
-        if len(xs) >= 2:
+        if len(xs) >= 1:
             arr = np.column_stack([np.asarray(xs, dtype=float), np.asarray(ys, dtype=float)])
+            # Avoid accidental implicit join: if the first point equals the previous
+            # segment's last point, drop the duplicated first point. Keep even 1-point
+            # segments to preserve boundary count semantics in tests.
             if prev_last is not None and arr.shape[0] >= 1 and np.allclose(arr[0], prev_last):
                 arr = arr[1:, :]
-            if arr.shape[0] >= 2:
-                segments.append(arr)
             if arr.shape[0] >= 1:
+                segments.append(arr)
                 prev_last = arr[-1].copy()
             else:
+                # If all points were dropped (fully duplicate), reset prev_last
                 prev_last = None
     return segments
 

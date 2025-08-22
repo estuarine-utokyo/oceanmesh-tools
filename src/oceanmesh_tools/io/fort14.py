@@ -359,22 +359,30 @@ def parse_fort14(path: str | Path) -> Fort14:
         except Exception:
             return Fort14(title, n_nodes, n_elements, nodes, elements, [], [])
 
-        # Optional total nodes line; if present and simple int, consume; else rewind
+        # Optional total nodes line (robust): only consider when n_open == 1.
+        # Some files omit this line or place a boundary header immediately after n_open
+        # when multiple boundaries exist; avoid misinterpreting the first boundary header
+        # as a total-node count.
         pos_after_n_open = f.tell()
         open_total_nodes: Optional[int] = None
         open_pos_before_total = None
-        ints, pos_before = _read_nonempty_ints(f)
-        # Always rewind after peeking; do not consume here
-        if ints is not None and len(ints) == 1:
-            open_total_nodes = ints[0]
-            open_pos_before_total = pos_before
-        # Rewind to position after n_open to let boundary parsing consume correctly
-        if ints is not None:
-            f.seek(pos_before)
+        if n_open == 1:
+            ints, pos_before = _read_nonempty_ints(f)
+            # Always rewind after peeking; do not consume here
+            if ints is not None and len(ints) == 1:
+                open_total_nodes = ints[0]
+                open_pos_before_total = pos_before
+            # Rewind to position after n_open to let boundary parsing consume correctly
+            if ints is not None:
+                f.seek(pos_before)
+            else:
+                f.seek(pos_after_n_open)
         else:
+            # Multiple boundaries case: do not attempt to read a total-nodes line,
+            # as the next line is typically a per-boundary header.
             f.seek(pos_after_n_open)
 
-        # If a total-nodes line exists, consume it once before boundaries
+        # If a total-nodes line exists (single-boundary case), consume it once before boundaries
         if open_total_nodes is not None:
             _ = _read_nonempty_line(f)
 
@@ -401,18 +409,21 @@ def parse_fort14(path: str | Path) -> Fort14:
         pos_after_n_land = f.tell()
         land_total_nodes: Optional[int] = None
         land_pos_before_total = None
-        ints, pos_before = _read_nonempty_ints(f)
-        # Always rewind after peeking; do not consume here
-        if ints is not None and len(ints) == 1:
-            land_total_nodes = ints[0]
-            land_pos_before_total = pos_before
-        # Rewind to position after n_land to let boundary parsing consume correctly
-        if ints is not None:
-            f.seek(pos_before)
+        if n_land == 1:
+            ints, pos_before = _read_nonempty_ints(f)
+            # Always rewind after peeking; do not consume here
+            if ints is not None and len(ints) == 1:
+                land_total_nodes = ints[0]
+                land_pos_before_total = pos_before
+            # Rewind to position after n_land to let boundary parsing consume correctly
+            if ints is not None:
+                f.seek(pos_before)
+            else:
+                f.seek(pos_after_n_land)
         else:
             f.seek(pos_after_n_land)
 
-        # If a total-nodes line exists, consume it once before land boundaries
+        # If a total-nodes line exists (single-boundary case), consume it once before land boundaries
         if land_total_nodes is not None:
             _ = _read_nonempty_line(f)
 
