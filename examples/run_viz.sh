@@ -1,11 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# One-mesh visualizer (simple).
-# Default: mesh.png only, DPI=600, DEM OFF, with coastline(open=red/blue) overlays.
+# One-mesh visualizer (single-file).
+# Default: mesh.png only, DPI=600, DEM OFF, with coastline/open-boundary overlays.
 # Add --coastline / --openboundaries / --all / --with-dem as needed.
-#
-# Pass extra Python-side options after '--' (not usually needed).
 
 # ========= USER-EDITABLE =========
 MESH="tb_uniform_400m"   # e.g., tb_futtsu_5regions / tb_uniform_400m / <your mesh>
@@ -17,7 +15,7 @@ REGION="Tokyo_Bay"
 TB_DIR="${OM2D_DIR}/${REGION}"
 PAIRS_FILE="${TB_DIR}/pairs.yaml"
 
-# Known mapping (extend if you add meshes)
+# Known mapping (extend as needed)
 declare -A KNOWN_SCRIPT=(
   [tb_futtsu_5regions]="${TB_DIR}/scripts/mesh_wide_futtsu_5r.m"
   [tb_uniform_400m]="${TB_DIR}/scripts/mesh_bay_uniform_400m.m"
@@ -31,17 +29,12 @@ Figure switches (default: mesh-only):
   --mesh             include mesh.png          (default ON)
   --coastline        include coastline_overlay.png
   --openboundaries   include open_boundaries.png
-  --all              include all of the above
+  --all              include all figures
+
 General:
   --with-dem         enable DEM underlay for mesh figure (default OFF)
   --dpi N            set DPI (default: ${DEFAULT_DPI})
   -h, --help         show this help
-
-Examples:
-  $(basename "$0")                  # mesh.png only, DPI=600, DEM off
-  $(basename "$0") --coastline      # mesh + coastline
-  $(basename "$0") --all            # mesh + coastline + openboundaries
-  $(basename "$0") --with-dem       # mesh with DEM underlay
 USAGE
 }
 
@@ -51,7 +44,6 @@ abspath() {
   elif command -v realpath >/dev/null 2>&1; then realpath "$p" 2>/dev/null || echo "$p"
   else echo "$p"; fi
 }
-
 err()  { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "$*"; }
 
@@ -117,11 +109,11 @@ info "==> Step 1/2: Running omt scan..."
 omt scan --pairs-file "${PAIRS_FILE}" --out catalog.json
 info "✓ scan done"
 
-# ---- viz (direct call; no CLI flags required) ----
+# ---- viz (direct call; no 'omt viz') ----
 OUT_DIR="figs/${MESH}"
 mkdir -p "${OUT_DIR}"
 
-# build requested figure list for Python
+# Requested figures (default: mesh)
 FIGS=()
 (( want_mesh )) && FIGS+=("mesh")
 (( want_coast )) && FIGS+=("coastline")
@@ -136,13 +128,13 @@ MESH_DEM="${WITH_DEM}" \
 MESH_FIGS="${FIGS[*]}" \
 python - "$@" <<'PY'
 import os
+from pathlib import Path
 import matplotlib
 matplotlib.use("Agg")
 from oceanmesh_tools.plot import viz as V
-from oceanmesh_tools.io.fort14 import mesh_bbox_from_fort14
 
 fort14 = os.environ["MESH_FORT14"]
-out    = os.environ["MESH_OUT"]
+out    = Path(os.environ["MESH_OUT"])  # must be Path-like
 dpi    = int(os.environ.get("MESH_DPI","600"))
 dem_on = os.environ.get("MESH_DEM","0") in ("1","true","True","YES","yes","on")
 figs   = os.environ.get("MESH_FIGS","mesh").split()
@@ -150,8 +142,7 @@ figs   = os.environ.get("MESH_FIGS","mesh").split()
 if "mesh" in figs:
     V.plot_mesh(f14_path=fort14, outdir=out, mesh_add_coastline=True, mesh_add_open_boundaries=True, dem_enable=dem_on, dem_path=None, dpi=dpi)
 if "coastline" in figs:
-    bbox = mesh_bbox_from_fort14(fort14)
-    V.plot_coastline_overlay(shp_path=fort14, mesh_bbox=bbox, outdir=out, fort14_path=fort14, coast_source="mesh14", dpi=dpi)
+    V.plot_coastline_overlay(shp_path=fort14, mesh_bbox=V.mesh_bbox_from_fort14(fort14) if hasattr(V, 'mesh_bbox_from_fort14') else (0,0,0,0), outdir=out, fort14_path=fort14, coast_source="mesh14", dpi=dpi)
 if "openboundaries" in figs:
     V.plot_open_boundaries(f14_path=fort14, outdir=out, dpi=dpi)
 PY

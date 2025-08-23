@@ -437,9 +437,27 @@ def cmd_viz(args: argparse.Namespace) -> int:
         explicit_dem,
     )
 
-    # Figure selection and DPI
-    figs = args.figs or ['mesh', 'coastline', 'openboundaries'] if hasattr(args, 'figs') else ['mesh', 'coastline', 'openboundaries']
+    # Figure selection and DPI (CLI flags with env fallbacks)
+    import os as _os, re as _re
+    def _env_list(name: str):
+        v = (_os.environ.get(name, '') or '').strip()
+        return [x for x in _re.split(r'[\s,]+', v) if x] if v else None
+    def _truthy(val) -> bool:
+        if val is None:
+            return False
+        return str(val).strip().lower() in ('1', 'true', 'yes', 'on')
+
+    env_figs = _env_list('OMT_VIZ_FIGS')
+    figs = (args.figs or env_figs or ['mesh', 'coastline', 'openboundaries']) if hasattr(args, 'figs') else (env_figs or ['mesh', 'coastline', 'openboundaries'])
+    env_dpi = _os.environ.get('OMT_VIZ_DPI')
     dpi = getattr(args, 'dpi', None)
+    if dpi is None and env_dpi:
+        try:
+            dpi = int(env_dpi)
+        except Exception:
+            dpi = None
+    env_dem = _os.environ.get('OMT_VIZ_DEM')
+    dem_env = _truthy(env_dem)
     # Build kwargs and filter by viz.plot_mesh signature to avoid TypeError when CLI/viz evolve
     import inspect as _inspect
     from .plot import viz as _viz_mod
@@ -450,7 +468,7 @@ def cmd_viz(args: argparse.Namespace) -> int:
         coastline_path=shp_path if 'mesh' in figs else None,
         mesh_add_coastline=('coastline' in figs),
         mesh_add_open_boundaries=('openboundaries' in figs),
-        dem_enable=bool(getattr(args, 'dem', False)),
+        dem_enable=bool(getattr(args, 'dem', False)) or dem_env,
         dem_path=dem_path if dem_path and dem_path.exists() else None,
         dem_alpha=1.0,
         include_holes=getattr(args, "coast_include_holes", True),
@@ -478,7 +496,7 @@ def cmd_viz(args: argparse.Namespace) -> int:
             plot_open_boundaries(fort14, outdir, dpi=dpi)
         except Exception as e:
             print(f"Open boundaries plot skipped: {e}")
-    if dem_path and dem_path.exists():
+    if (bool(getattr(args, 'dem', False)) or dem_env) and dem_path and dem_path.exists():
         try:
             plot_bathymetry_filled(dem_path, outdir)
         except Exception as e:
@@ -488,7 +506,7 @@ def cmd_viz(args: argparse.Namespace) -> int:
         except Exception as e:
             print(f"DEM contours plot skipped: {e}")
     else:
-        print("No DEM detected; skipping bathymetry plots")
+        print("DEM disabled or not detected; skipping DEM plots")
     if 'coastline' in figs:
         try:
             bbox = mesh_bbox_from_fort14(fort14)
