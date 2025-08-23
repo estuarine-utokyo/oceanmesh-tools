@@ -33,6 +33,19 @@ def parse_fort14_boundaries(path: str | Path) -> Fort14Boundaries:
     land_segments: List[Tuple[Optional[int], List[int]]] = []
     for seg in m.land_boundaries:
         land_segments.append((None, [int(n) - 1 for n in seg if int(n) - 1 >= 0]))
+    # Validate indices are in range
+    nmax = nodes_xy.shape[0]
+    def _check_segment(seg: List[int], kind: str):
+        if not seg:
+            return
+        mi, ma = min(seg), max(seg)
+        if mi < 0 or ma >= nmax:
+            raise ValueError(f"{kind} segment index out of range: min={mi}, max={ma}, n={nmax}")
+    for seg in open_segments:
+        _check_segment(seg, "open")
+    for _ib, seg in land_segments:
+        _check_segment(seg, "land")
+
     meta = {
         'NOPE': len(m.open_boundaries),
         'NBOU': sum(len(seg) for seg in m.open_boundaries),
@@ -42,4 +55,3 @@ def parse_fort14_boundaries(path: str | Path) -> Fort14Boundaries:
         'NELEMS': int(m.n_elements),
     }
     return Fort14Boundaries(nodes_xy=nodes_xy, open_segments=open_segments, land_segments=land_segments, meta=meta)
-

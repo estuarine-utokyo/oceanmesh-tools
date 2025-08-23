@@ -26,7 +26,13 @@ except Exception:  # pragma: no cover
 
 from ..io.fort14 import Fort14, parse_fort14
 from ..io.fort14_boundaries import parse_fort14_boundaries
-from .boundary_fast import build_paths_from_segments, classify_land_segments, segments_to_linecollection
+from .boundary_fast import (
+    build_paths_from_segments,
+    classify_land_segments,
+    segments_to_linecollection,
+    segments_to_edges,
+    edges_to_linecollection,
+)
 from ..mesh.boundary import (
     build_edge_counts,
     boundary_edges_from_counts,
@@ -249,9 +255,13 @@ def plot_mesh(
         with step("[1/2] Reading fort.14 boundaries ...", show_progress):
             b = parse_fort14_boundaries(f14_path)
         with step("[2/2] Building polylines ...", show_progress):
-            openbnd_paths = build_paths_from_segments(b.nodes_xy, b.open_segments)
+            # Build edges and render via LineCollections (no concatenation across segments)
             coast_ids = classify_land_segments(b.land_segments, include_ibtype=include_ibtype).get('coast', [])
-            coast_paths_xy = build_paths_from_segments(b.nodes_xy, coast_ids)
+            open_edges = segments_to_edges(b.open_segments)
+            coast_edges = segments_to_edges(coast_ids)
+            lc_red, n_red = edges_to_linecollection(b.nodes_xy, coast_edges, color='r', zorder=5)
+            lc_blue, n_blue = edges_to_linecollection(b.nodes_xy, open_edges, color='b', zorder=6)
+            print(f"[coast/open edges] red={n_red}, blue={n_blue}")
         # Also set mesh, xs, ys from nodes for drawing elements
         xs = {i + 1: float(b.nodes_xy[i, 0]) for i in range(b.nodes_xy.shape[0])}
         ys = {i + 1: float(b.nodes_xy[i, 1]) for i in range(b.nodes_xy.shape[0])}
@@ -305,16 +315,10 @@ def plot_mesh(
         openbnd_paths = snapped_paths
 
     if mesh_add_coastline and coast_source in ("mesh", "mesh14"):
-        # Draw coastline from mesh boundary classification (independent segments)
+        # Draw coastline/open using LineCollections in mesh14 mode; mesh mode uses path plotting
         if coast_source == "mesh14" and 'b' in locals():
-            # Use Land segments directly with LineCollection
-            coast_ids = classify_land_segments(b.land_segments, include_ibtype=include_ibtype).get('coast', [])
-            lc_red, n_red = segments_to_linecollection(b.nodes_xy, coast_ids, color='r', zorder=5)
             ax.add_collection(lc_red)
-            # Open boundaries
-            lc_blue, n_blue = segments_to_linecollection(b.nodes_xy, b.open_segments, color='b', zorder=6)
             ax.add_collection(lc_blue)
-            print(f"[coast] segments(red)={n_red}, [open] segments(blue)={n_blue}")
             ax.autoscale_view()
         else:
             for arr in coast_paths_xy:
@@ -840,9 +844,13 @@ def plot_coastline_overlay(
         if coast_source == "mesh14":
             b = parse_fort14_boundaries(fort14_path)
             coast_ids = classify_land_segments(b.land_segments).get('coast', [])
-            lc_red, n_red = segments_to_linecollection(b.nodes_xy, coast_ids, color='C0', zorder=2)
+            open_edges = segments_to_edges(b.open_segments)
+            coast_edges = segments_to_edges(coast_ids)
+            lc_red, n_red = edges_to_linecollection(b.nodes_xy, coast_edges, color='C0', zorder=2)
             ax.add_collection(lc_red)
-            print(f"[coast overlay] segments={n_red}")
+            lc_blue, n_blue = edges_to_linecollection(b.nodes_xy, open_edges, color='b', zorder=3)
+            ax.add_collection(lc_blue)
+            print(f"[coast/open edges overlay] red={n_red}, blue={n_blue}")
             ax.autoscale_view()
         else:
             m = parse_fort14(fort14_path)
