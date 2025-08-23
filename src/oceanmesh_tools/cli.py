@@ -437,11 +437,9 @@ def cmd_viz(args: argparse.Namespace) -> int:
         explicit_dem,
     )
 
-    # Plot outputs; ignore failures for optional ones
-    # Mesh figure with optional overlays
-    add_all = getattr(args, "mesh_add_all", False)
-    add_coast = getattr(args, "mesh_add_coastline", True) or add_all
-    add_open = getattr(args, "mesh_add_open_boundaries", True) or add_all
+    # Figure selection and DPI
+    figs = args.figs or ['mesh', 'coastline', 'openboundaries'] if hasattr(args, 'figs') else ['mesh', 'coastline', 'openboundaries']
+    dpi = getattr(args, 'dpi', None)
     # Build kwargs and filter by viz.plot_mesh signature to avoid TypeError when CLI/viz evolve
     import inspect as _inspect
     from .plot import viz as _viz_mod
@@ -449,9 +447,12 @@ def cmd_viz(args: argparse.Namespace) -> int:
     _kw = dict(
         f14_path=fort14,
         outdir=outdir,
-        coastline_path=shp_path if add_coast else None,
-        mesh_add_coastline=add_coast,
-        mesh_add_open_boundaries=add_open,
+        coastline_path=shp_path if 'mesh' in figs else None,
+        mesh_add_coastline=('coastline' in figs),
+        mesh_add_open_boundaries=('openboundaries' in figs),
+        dem_enable=bool(getattr(args, 'dem', False)),
+        dem_path=dem_path if dem_path and dem_path.exists() else None,
+        dem_alpha=1.0,
         include_holes=getattr(args, "coast_include_holes", True),
         target_crs=getattr(args, "crs", None),
         coast_skip_near_openbnd=getattr(args, "coast_skip_near_openbnd", True),
@@ -467,10 +468,16 @@ def cmd_viz(args: argparse.Namespace) -> int:
         include_ibtype=tuple(getattr(args, 'include_ibtype', [20, 21])),
         debug_boundaries=getattr(args, 'debug_boundaries', False),
         edge_length_threshold_deg=getattr(args, 'edge_length_threshold_deg', 1.5),
+        dpi=dpi,
     )
     _kw = {k: v for k, v in _kw.items() if k in _sig.parameters}
-    mesh_png = _viz_mod.plot_mesh(**_kw)
-    ob_png = plot_open_boundaries(fort14, outdir)
+    if 'mesh' in figs:
+        _ = _viz_mod.plot_mesh(**_kw)
+    if 'openboundaries' in figs:
+        try:
+            plot_open_boundaries(fort14, outdir, dpi=dpi)
+        except Exception as e:
+            print(f"Open boundaries plot skipped: {e}")
     if dem_path and dem_path.exists():
         try:
             plot_bathymetry_filled(dem_path, outdir)
@@ -482,11 +489,11 @@ def cmd_viz(args: argparse.Namespace) -> int:
             print(f"DEM contours plot skipped: {e}")
     else:
         print("No DEM detected; skipping bathymetry plots")
-    if shp_path and shp_path.exists():
+    if 'coastline' in figs:
         try:
             bbox = mesh_bbox_from_fort14(fort14)
             plot_coastline_overlay(
-                shp_path,
+                shp_path if shp_path else fort14,
                 bbox,
                 outdir,
                 include_holes=getattr(args, "coast_include_holes", False),
@@ -501,11 +508,10 @@ def cmd_viz(args: argparse.Namespace) -> int:
                 include_ibtype=tuple(getattr(args, 'include_ibtype', [20, 21])),
                 debug_boundaries=getattr(args, 'debug_boundaries', False),
                 edge_length_threshold_deg=getattr(args, 'edge_length_threshold_deg', 1.5),
+                dpi=dpi,
             )
         except Exception as e:
             print(f"Coastline overlay skipped: {e}")
-    else:
-        print("No shapefile detected; skipping coastline overlay")
 
     print("\nSummary:")
     print(f"  fort14: {fort14}")
@@ -552,7 +558,8 @@ def build_parser() -> argparse.ArgumentParser:
     s_viz.add_argument("--fort14", required=True, help="Path to fort.14 file")
     s_viz.add_argument("--catalog", help="Path to catalog.json from scan")
     s_viz.add_argument("--script", help="Path to generating MATLAB script (.m)")
-    s_viz.add_argument("--dem", help="DEM path or 'auto'", default="auto")
+    # DEM opt-in (default off). BooleanOptionalAction provides --dem / --no-dem
+    s_viz.add_argument("--dem", dest="dem", action=BoolAction, default=False, help="Enable DEM underlay/plots (default: off)")
     s_viz.add_argument("--shp", help="Shapefile path/dir or 'auto'", default="auto")
     s_viz.add_argument("--coast-source", choices=["mesh14", "mesh", "shp"], default="mesh14", help="Source for coastline: mesh-derived via fort.14, boundary edges, or shapefile")
     s_viz.add_argument("--coast-shp-background", help="Optional shapefile background for mesh-derived coastline", default=None)

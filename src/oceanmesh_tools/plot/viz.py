@@ -224,6 +224,9 @@ def plot_mesh(
     coastline_path: Optional[Path] = None,
     mesh_add_coastline: bool = True,
     mesh_add_open_boundaries: bool = True,
+    dem_enable: bool = False,
+    dem_path: Optional[Path] = None,
+    dem_alpha: float = 1.0,
     include_holes: bool = True,
     target_crs: Optional[str] = None,
     coast_skip_near_openbnd: bool = True,
@@ -240,12 +243,26 @@ def plot_mesh(
     debug_boundaries: bool = False,
     edge_length_threshold_deg: float = 1.5,
     show_progress: bool = True,
+    dpi: Optional[int] = None,
 ) -> Path:
     _ensure_outdir(outdir)
     mesh = parse_fort14(f14_path)
     xs = {nid: x for nid, x, y, d in mesh.nodes}
     ys = {nid: y for nid, x, y, d in mesh.nodes}
     fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
+    # Optional DEM underlay (opt-in)
+    if dem_enable and dem_path is not None and dem_path.exists():
+        if rasterio is not None:
+            try:
+                with rasterio.open(dem_path) as src:  # type: ignore
+                    arr = src.read(1)  # type: ignore
+                    bounds = src.bounds  # type: ignore
+                    extent = (bounds.left, bounds.right, bounds.bottom, bounds.top)
+                    ax.imshow(arr, extent=extent, origin='upper', cmap='viridis', alpha=float(dem_alpha), zorder=0)
+            except Exception:
+                pass
+        # xarray fallback isn't ideal for underlay; skip if rasterio unavailable
+
     for _, n1, n2, n3, _ in mesh.elements:
         ax.plot([xs[n1], xs[n2]], [ys[n1], ys[n2]], color="k", linewidth=0.2)
         ax.plot([xs[n2], xs[n3]], [ys[n2], ys[n3]], color="k", linewidth=0.2)
@@ -441,7 +458,10 @@ def plot_mesh(
     ax.set_aspect("equal", adjustable="box")
     png = outdir / "mesh.png"
     fig.tight_layout()
-    fig.savefig(png)
+    if dpi is not None:
+        fig.savefig(png, dpi=dpi)
+    else:
+        fig.savefig(png)
     plt.close(fig)
     # Optional audit plot
     if audit_boundary and (outer_paths_xy or openbnd_paths):
@@ -493,7 +513,7 @@ def plot_mesh(
     return png
 
 
-def plot_open_boundaries(f14_path: Path, outdir: Path) -> Path:
+def plot_open_boundaries(f14_path: Path, outdir: Path, dpi: Optional[int] = None) -> Path:
     _ensure_outdir(outdir)
     mesh = parse_fort14(f14_path)
     xs = {nid: x for nid, x, y, d in mesh.nodes}
@@ -515,7 +535,10 @@ def plot_open_boundaries(f14_path: Path, outdir: Path) -> Path:
     ax.set_aspect("equal", adjustable="box")
     png = outdir / "open_boundaries.png"
     fig.tight_layout()
-    fig.savefig(png)
+    if dpi is not None:
+        fig.savefig(png, dpi=dpi)
+    else:
+        fig.savefig(png)
     plt.close(fig)
     return png
 
@@ -915,6 +938,7 @@ def plot_coastline_overlay(
     include_ibtype: Tuple[int, ...] = (20, 21),
     debug_boundaries: bool = False,
     edge_length_threshold_deg: float = 1.5,
+    dpi: Optional[int] = None,
 ) -> Path:
     if gpd is None:
         raise RuntimeError("geopandas is required to plot coastline overlay")
@@ -1018,7 +1042,10 @@ def plot_coastline_overlay(
         ax.set_aspect("equal", adjustable="box")
         png = outdir / "coastline_overlay.png"
         fig.tight_layout()
-        fig.savefig(png)
+        if dpi is not None:
+            fig.savefig(png, dpi=dpi)
+        else:
+            fig.savefig(png)
         plt.close(fig)
         return png
     gdf = gpd.read_file(shp_path)  # type: ignore
@@ -1070,6 +1097,9 @@ def plot_coastline_overlay(
     ax.set_aspect("equal", adjustable="box")
     png = outdir / "coastline_overlay.png"
     fig.tight_layout()
-    fig.savefig(png)
+    if dpi is not None:
+        fig.savefig(png, dpi=dpi)
+    else:
+        fig.savefig(png)
     plt.close(fig)
     return png

@@ -62,6 +62,7 @@ info(){ echo "$*"; }
 want_mesh=1
 want_coast=0
 want_open=0
+WITH_DEM=0
 DPI="${DEFAULT_DPI}"
 EXTRA_ARGS=()
 
@@ -72,6 +73,7 @@ while (( $# )); do
     --openboundaries)  want_open=1; shift ;;
     --all)             want_mesh=1; want_coast=1; want_open=1; shift ;;
     --dpi)             [[ $# -ge 2 ]] || err "--dpi requires a number"; DPI="$2"; shift 2 ;;
+    --with-dem)        WITH_DEM=1; shift ;;
     -h|--help)         usage; exit 0 ;;
     --)                shift; EXTRA_ARGS=("$@"); break ;;   # pass-through to omt viz
     *)                 err "Unknown option: $1 (use --help)" ;;
@@ -159,6 +161,10 @@ if (( HAS_DPI_FLAG )); then
   cmd+=(--dpi "${DPI}")
 else
   warn "'omt viz' has no --dpi; using tool default DPI."
+fi
+# DEM opt-in
+if (( WITH_DEM )); then
+  cmd+=(--dem)
 fi
 # add pass-through args (if any)
 cmd+=("${EXTRA_ARGS[@]}")

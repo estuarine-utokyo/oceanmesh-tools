@@ -112,7 +112,8 @@ Configuration
 CLI Summary
 
 - `omt scan`: Recursively scans MATLAB `.m` files under `<dir>/<Region>/` to detect mesh names (`write(m,'NAME')`) and input hints from `geodata(...)` or variable assignments. Resolves shapefile/DEM candidates from `<Region>/data/` then `datasets/`.
-- `omt viz`: Plots `mesh.png`, `bathymetry_filled.png`, `bathymetry_contours.png`, `coastline_overlay.png`, `open_boundaries.png`. Handles CRS via geopandas/rasterio if available.
+- `omt viz`: Plots `mesh.png`, optionally `coastline_overlay.png` and `open_boundaries.png`. DEM plots are opt-in.
+  - New: `--figs {mesh,coastline,openboundaries}...` to select which figures to render; `--dpi INT` to set save DPI; `--dem/--no-dem` to enable/disable DEM plots (default: off).
   - Flags: `--require-inputs` fails with non-zero exit if DEM/Shapefile cannot be resolved and prints a "Resolution attempts" summary.
   - Coastline options: `--coast-include-holes` includes polygon interior rings (holes) when drawing coastlines; by default only exteriors are drawn.
 
@@ -147,6 +148,19 @@ See also the quickstart notebook in `notebooks/00_quickstart.ipynb`.
       - `tb_uniform_400m.14` → `figs/tb_uniform_400m`
   - Requirements: OceanMesh2D data under `$HOME/Github/OceanMesh2D/Tokyo_Bay/` and `omt` installed (`make install`).
 
+Examples (CLI):
+
+```bash
+# Only mesh.png, at DPI=600
+omt viz --fort14 /path/to/mesh.14 --out figs/NAME --figs mesh --dpi 600
+
+# Mesh + coastline overlays (coastline_overlay.png)
+omt viz --fort14 /path/to/mesh.14 --out figs/NAME --figs mesh coastline
+
+# Open boundaries only, DPI=300
+omt viz --fort14 /path/to/mesh.14 --out figs/NAME --figs openboundaries --dpi 300
+```
+
 Housekeeping
 
 ```bash
@@ -156,11 +170,12 @@ make clean-purge  # also delete generated/debug artifacts in working tree
 
 - Generated artifacts (e.g., `figs/`, `catalog.json`, `pairs.yaml`, and debug dumps) are git-ignored.
 
-### One-mesh runner (mesh-only by default, DPI=600)
+### One-mesh runner (mesh-only by default, DPI=600, DEM off)
 
 ```bash
 cd examples
-./run_viz.sh                       # mesh.png only (DPI=600)
+./run_viz.sh                       # mesh.png only (DPI=600), DEM off
+./run_viz.sh --with-dem            # mesh.png only, DEM on
 ./run_viz.sh --coastline           # mesh + coastline
 ./run_viz.sh --openboundaries      # mesh + open boundaries
 ./run_viz.sh --all                 # mesh + coastline + open boundaries
@@ -168,3 +183,8 @@ cd examples
 ```
 
 Edit `MESH="..."` at the top of the script to target a different mesh. The script auto-detects the matching MATLAB script; if ambiguous or missing, it prints a helpful message and exits.
+
+Defaults
+
+- Mesh figure overlays: coastline (red) and open-boundary (blue) are on by default.
+- DEM is off by default; enable with `--dem` (or `--with-dem` in the example script).
