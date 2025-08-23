@@ -155,3 +155,16 @@ make clean-purge  # also delete generated/debug artifacts in working tree
 ```
 
 - Generated artifacts (e.g., `figs/`, `catalog.json`, `pairs.yaml`, and debug dumps) are git-ignored.
+
+### One-mesh runner (mesh-only by default, DPI=600)
+
+```bash
+cd examples
+./run_viz.sh                       # mesh.png only (DPI=600)
+./run_viz.sh --coastline           # mesh + coastline
+./run_viz.sh --openboundaries      # mesh + open boundaries
+./run_viz.sh --all                 # mesh + coastline + open boundaries
+./run_viz.sh --dpi 300 -- --no-dem # pass extra flags to 'omt viz'
+```
+
+Edit `MESH="..."` at the top of the script to target a different mesh. The script auto-detects the matching MATLAB script; if ambiguous or missing, it prints a helpful message and exits.
