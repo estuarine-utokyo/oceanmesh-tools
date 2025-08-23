@@ -188,3 +188,5 @@ Defaults
 
 - Mesh figure overlays: coastline (red) and open-boundary (blue) are on by default.
 - DEM is off by default; enable with `--dem` (or `--with-dem` in the example script).
+
+Note: The example runner now uses a direct Python driver to render only the requested figures (faster, no warnings). It still uses `omt scan` to build `catalog.json` for convenience.

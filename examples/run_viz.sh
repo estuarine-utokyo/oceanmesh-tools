@@ -133,7 +133,7 @@ info "==> Step 1/2: Running omt scan..."
 omt scan --pairs-file "${PAIRS_FILE}" --out catalog.json
 info "✓ scan done"
 
-# -------- build figs list & feature detection --------
+# -------- viz (direct driver; no CLI flags needed) --------
 OUT_DIR="figs/${MESH}"
 mkdir -p "${OUT_DIR}"
 
@@ -142,54 +142,20 @@ declare -a FIGS=()
 (( want_mesh )) && FIGS+=("mesh")
 (( want_coast )) && FIGS+=("coastline")
 (( want_open )) && FIGS+=("openboundaries")
+# default (no switches) -> mesh only
+if (( ${#FIGS[@]} == 0 )); then FIGS=("mesh"); fi
 
-# Detect feature support in 'omt viz --help'
-VIZ_HELP="$(omt viz --help 2>/dev/null || true)"
-HAS_FIGS_FLAG=0
-HAS_DPI_FLAG=0
-grep -q -- "--figs" <<<"${VIZ_HELP}"  && HAS_FIGS_FLAG=1
-grep -q -- "--dpi"  <<<"${VIZ_HELP}"  && HAS_DPI_FLAG=1
+PYDRV="$(dirname "$0")/mesh_viz_driver.py"
+[[ -x "${PYDRV}" ]] || chmod +x "${PYDRV}"
 
-# Compose command
-cmd=(omt viz --fort14 "${FORT14_ABS}" --catalog catalog.json --out "${OUT_DIR}")
-if (( HAS_FIGS_FLAG )); then
-  for f in "${FIGS[@]}"; do cmd+=(--figs "$f"); done
-else
-  warn "'omt viz' has no --figs; will prune unrequested PNGs after rendering."
-fi
-if (( HAS_DPI_FLAG )); then
-  cmd+=(--dpi "${DPI}")
-else
-  warn "'omt viz' has no --dpi; using tool default DPI."
-fi
-# DEM opt-in
-if (( WITH_DEM )); then
-  cmd+=(--dem)
-fi
-# add pass-through args (if any)
-cmd+=("${EXTRA_ARGS[@]}")
-info "==> Step 2/2: Visualizing ${MESH}..."
-"${cmd[@]}"
-info "✓ viz done"
-
-# -------- prune (fallback if --figs not supported) --------
-if (( ! HAS_FIGS_FLAG )); then
-  # Keep only requested files
-  declare -A KEEP=()
-  for f in "${FIGS[@]}"; do
-    case "$f" in
-      mesh)            KEEP["mesh.png"]=1 ;;
-      coastline)       KEEP["coastline_overlay.png"]=1 ;;
-      openboundaries)  KEEP["open_boundaries.png"]=1 ;;
-    esac
-  done
-  shopt -s nullglob
-  for png in "${OUT_DIR}"/*.png; do
-    base="${png##*/}"
-    if [[ -z "${KEEP[$base]:-}" ]]; then
-      rm -f -- "$png"
-    fi
-  done
-fi
+info "==> Step 2/2: Visualizing ${MESH} (direct driver)..."
+"${PYDRV}" \
+  --fort14 "${FORT14_ABS}" \
+  --catalog catalog.json \
+  --out "${OUT_DIR}" \
+  --dpi "${DPI}" \
+  ${WITH_DEM:+--dem} \
+  --figs "${FIGS[@]}"
+info "✓ viz done (direct)"
 
 info "[omt] Done. Outputs under ${OUT_DIR}"
