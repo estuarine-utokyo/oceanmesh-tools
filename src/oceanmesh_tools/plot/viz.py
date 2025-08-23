@@ -26,7 +26,7 @@ except Exception:  # pragma: no cover
 
 from ..io.fort14 import Fort14, parse_fort14
 from ..io.fort14_boundaries import parse_fort14_boundaries
-from .boundary_fast import build_paths_from_segments, classify_land_segments
+from .boundary_fast import build_paths_from_segments, classify_land_segments, segments_to_linecollection
 from ..mesh.boundary import (
     build_edge_counts,
     boundary_edges_from_counts,
@@ -305,10 +305,21 @@ def plot_mesh(
         openbnd_paths = snapped_paths
 
     if mesh_add_coastline and coast_source in ("mesh", "mesh14"):
-        # Draw coastline from mesh boundary classification
-        for arr in coast_paths_xy:
-            if isinstance(arr, np.ndarray) and arr.ndim == 2 and arr.shape[0] >= 2:
-                ax.plot(arr[:, 0], arr[:, 1], color="r", linestyle="-", zorder=5, solid_joinstyle='round', solid_capstyle='round')
+        # Draw coastline from mesh boundary classification (independent segments)
+        if coast_source == "mesh14" and 'b' in locals():
+            # Use Land segments directly with LineCollection
+            coast_ids = classify_land_segments(b.land_segments, include_ibtype=include_ibtype).get('coast', [])
+            lc_red, n_red = segments_to_linecollection(b.nodes_xy, coast_ids, color='r', zorder=5)
+            ax.add_collection(lc_red)
+            # Open boundaries
+            lc_blue, n_blue = segments_to_linecollection(b.nodes_xy, b.open_segments, color='b', zorder=6)
+            ax.add_collection(lc_blue)
+            print(f"[coast] segments(red)={n_red}, [open] segments(blue)={n_blue}")
+            ax.autoscale_view()
+        else:
+            for arr in coast_paths_xy:
+                if isinstance(arr, np.ndarray) and arr.ndim == 2 and arr.shape[0] >= 2:
+                    ax.plot(arr[:, 0], arr[:, 1], color="r", linestyle="-", zorder=5, solid_joinstyle='round', solid_capstyle='round')
         # Optional faint shapefile background
         if coast_shp_background is not None and coast_shp_background.exists() and gpd is not None:
             try:
@@ -338,7 +349,7 @@ def plot_mesh(
             subtract_tol=coast_subtract_tol,
         )
         # If geopandas unavailable, silently skip coastline overlay
-    if mesh_add_open_boundaries and openbnd_paths:
+    if mesh_add_open_boundaries and openbnd_paths and not (coast_source == "mesh14" and 'b' in locals()):
         for s in openbnd_paths:
             if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
                 ax.plot(s[:, 0], s[:, 1], color="b", linestyle="-", zorder=6, solid_joinstyle='round', solid_capstyle='round')
@@ -825,17 +836,20 @@ def plot_coastline_overlay(
     _ensure_outdir(outdir)
     # If mesh-derived coastline requested and fort14_path known, render without shapefile
     if coast_source in ("mesh", "mesh14") and fort14_path is not None:
+        fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
         if coast_source == "mesh14":
             b = parse_fort14_boundaries(fort14_path)
             coast_ids = classify_land_segments(b.land_segments).get('coast', [])
-            coast_paths = build_paths_from_segments(b.nodes_xy, coast_ids)
+            lc_red, n_red = segments_to_linecollection(b.nodes_xy, coast_ids, color='C0', zorder=2)
+            ax.add_collection(lc_red)
+            print(f"[coast overlay] segments={n_red}")
+            ax.autoscale_view()
         else:
             m = parse_fort14(fort14_path)
             coast_paths = _compute_mesh_boundary_xy_paths(m)[1]
-        fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
-        for arr in coast_paths:
-            if isinstance(arr, np.ndarray) and arr.ndim == 2 and arr.shape[0] >= 2:
-                ax.plot(arr[:, 0], arr[:, 1], color="C0", linewidth=0.6, zorder=2)
+            for arr in coast_paths:
+                if isinstance(arr, np.ndarray) and arr.ndim == 2 and arr.shape[0] >= 2:
+                    ax.plot(arr[:, 0], arr[:, 1], color="C0", linewidth=0.6, zorder=2)
         ax.set_title("Coastline Overlay (Mesh)")
         ax.set_xlabel("Lon/X")
         ax.set_ylabel("Lat/Y")
