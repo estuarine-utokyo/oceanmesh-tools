@@ -438,7 +438,19 @@ def cmd_viz(args: argparse.Namespace) -> int:
     )
 
     # Plot outputs; ignore failures for optional ones
-    mesh_png = plot_mesh(fort14, outdir)
+    # Mesh figure with optional overlays
+    add_all = getattr(args, "mesh_add_all", False)
+    add_coast = getattr(args, "mesh_add_coastline", True) or add_all
+    add_open = getattr(args, "mesh_add_open_boundaries", True) or add_all
+    mesh_png = plot_mesh(
+        fort14,
+        outdir,
+        coastline_path=shp_path if add_coast else None,
+        mesh_add_coastline=add_coast,
+        mesh_add_open_boundaries=add_open,
+        include_holes=getattr(args, "coast_include_holes", True),
+        target_crs=getattr(args, "crs", None),
+    )
     ob_png = plot_open_boundaries(fort14, outdir)
     if dem_path and dem_path.exists():
         try:
@@ -518,6 +530,29 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=True,
         help="Include interior rings (holes) from polygons when plotting coastlines",
+    )
+    # Mesh overlays on mesh.png
+    try:
+        from argparse import BooleanOptionalAction  # type: ignore
+        bool_action = BooleanOptionalAction
+    except Exception:  # pragma: no cover
+        bool_action = 'store_true'
+    s_viz.add_argument(
+        "--mesh-add-coastline",
+        action=bool_action,  # type: ignore[arg-type]
+        default=True,
+        help="Overlay coastline (red) on mesh.png",
+    )
+    s_viz.add_argument(
+        "--mesh-add-open-boundaries",
+        action=bool_action,  # type: ignore[arg-type]
+        default=True,
+        help="Overlay open boundaries (blue) on mesh.png",
+    )
+    s_viz.add_argument(
+        "--mesh-add-all",
+        action="store_true",
+        help="Shorthand to enable both coastline and open-boundary overlays",
     )
     s_viz.add_argument("--out", help="Output directory for figures")
     s_viz.add_argument("--crs", help="Target CRS like EPSG:4326", default="EPSG:4326")

@@ -93,7 +93,15 @@ def _ensure_outdir(outdir: Path) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
 
 
-def plot_mesh(f14_path: Path, outdir: Path) -> Path:
+def plot_mesh(
+    f14_path: Path,
+    outdir: Path,
+    coastline_path: Optional[Path] = None,
+    mesh_add_coastline: bool = True,
+    mesh_add_open_boundaries: bool = True,
+    include_holes: bool = True,
+    target_crs: Optional[str] = None,
+) -> Path:
     _ensure_outdir(outdir)
     mesh = parse_fort14(f14_path)
     xs = {nid: x for nid, x, y, d in mesh.nodes}
@@ -103,6 +111,31 @@ def plot_mesh(f14_path: Path, outdir: Path) -> Path:
         ax.plot([xs[n1], xs[n2]], [ys[n1], ys[n2]], color="k", linewidth=0.2)
         ax.plot([xs[n2], xs[n3]], [ys[n2], ys[n3]], color="k", linewidth=0.2)
         ax.plot([xs[n3], xs[n1]], [ys[n3], ys[n1]], color="k", linewidth=0.2)
+    # Optional overlays
+    if mesh_add_coastline and coastline_path is not None and coastline_path.exists():
+        if gpd is not None:
+            try:
+                gdf = gpd.read_file(coastline_path)  # type: ignore
+                try:
+                    if target_crs:
+                        gdf = gdf.to_crs(target_crs)  # type: ignore
+                    else:
+                        gdf = gdf.to_crs(epsg=4326)  # type: ignore
+                except Exception:
+                    pass
+                # Plot each ring separately in red
+                segs = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
+                for s in segs:
+                    if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
+                        ax.plot(s[:, 0], s[:, 1], color="r", linestyle="-", zorder=5)
+            except Exception:
+                pass
+        # If geopandas unavailable, silently skip coastline overlay
+    if mesh_add_open_boundaries and mesh.open_boundaries:
+        segs = _build_open_boundary_segments(mesh)
+        for s in segs:
+            if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
+                ax.plot(s[:, 0], s[:, 1], color="b", linestyle="-", zorder=6)
     ax.set_title("Mesh")
     ax.set_xlabel("Lon/X")
     ax.set_ylabel("Lat/Y")
