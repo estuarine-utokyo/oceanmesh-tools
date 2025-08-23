@@ -548,7 +548,7 @@ def build_parser() -> argparse.ArgumentParser:
     s_viz.add_argument("--script", help="Path to generating MATLAB script (.m)")
     s_viz.add_argument("--dem", help="DEM path or 'auto'", default="auto")
     s_viz.add_argument("--shp", help="Shapefile path/dir or 'auto'", default="auto")
-    s_viz.add_argument("--coast-source", choices=["mesh", "shp"], default="mesh", help="Source for coastline: mesh boundary edges or shapefile")
+    s_viz.add_argument("--coast-source", choices=["mesh14", "mesh", "shp"], default="mesh14", help="Source for coastline: mesh-derived via fort.14, boundary edges, or shapefile")
     s_viz.add_argument("--coast-shp-background", help="Optional shapefile background for mesh-derived coastline", default=None)
     # Boolean optional action support (Python >=3.9); fallback to store_true on older/limited argparse
     try:

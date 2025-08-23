@@ -25,6 +25,8 @@ except Exception:  # pragma: no cover
     xr = None
 
 from ..io.fort14 import Fort14, parse_fort14
+from ..io.fort14_boundaries import parse_fort14_boundaries
+from .boundary_fast import build_paths_from_segments, classify_land_segments
 from ..mesh.boundary import (
     build_edge_counts,
     boundary_edges_from_counts,
@@ -224,8 +226,10 @@ def plot_mesh(
     coast_clip_to_domain: bool = True,
     coast_subtract_near_ob: bool = True,
     coast_subtract_tol: float = 0.002,
-    coast_source: str = "mesh",
+    coast_source: str = "mesh14",
     coast_shp_background: Optional[Path] = None,
+    include_ibtype: Tuple[int, ...] = (20, 21),
+    show_progress: bool = True,
 ) -> Path:
     _ensure_outdir(outdir)
     mesh = parse_fort14(f14_path)
@@ -239,7 +243,19 @@ def plot_mesh(
     # Optional overlays
     openbnd_paths: List[np.ndarray] = []
     coast_paths_xy: List[np.ndarray] = []
-    if coast_source == "mesh":
+    if coast_source == "mesh14":
+        # Fast path from fort.14 boundary sections
+        from ..utils.progress import step
+        with step("[1/2] Reading fort.14 boundaries ...", show_progress):
+            b = parse_fort14_boundaries(f14_path)
+        with step("[2/2] Building polylines ...", show_progress):
+            openbnd_paths = build_paths_from_segments(b.nodes_xy, b.open_segments)
+            coast_ids = classify_land_segments(b.land_segments, include_ibtype=include_ibtype).get('coast', [])
+            coast_paths_xy = build_paths_from_segments(b.nodes_xy, coast_ids)
+        # Also set mesh, xs, ys from nodes for drawing elements
+        xs = {i + 1: float(b.nodes_xy[i, 0]) for i in range(b.nodes_xy.shape[0])}
+        ys = {i + 1: float(b.nodes_xy[i, 1]) for i in range(b.nodes_xy.shape[0])}
+    elif coast_source == "mesh":
         openbnd_paths, coast_paths_xy = _compute_mesh_boundary_xy_paths(mesh)
     elif mesh_add_open_boundaries and mesh.open_boundaries:
         openbnd_paths = _build_open_boundary_segments(mesh)
@@ -288,7 +304,7 @@ def plot_mesh(
     if snapped_paths:
         openbnd_paths = snapped_paths
 
-    if mesh_add_coastline and coast_source == "mesh":
+    if mesh_add_coastline and coast_source in ("mesh", "mesh14"):
         # Draw coastline from mesh boundary classification
         for arr in coast_paths_xy:
             if isinstance(arr, np.ndarray) and arr.ndim == 2 and arr.shape[0] >= 2:
@@ -808,9 +824,14 @@ def plot_coastline_overlay(
         raise RuntimeError("geopandas is required to plot coastline overlay")
     _ensure_outdir(outdir)
     # If mesh-derived coastline requested and fort14_path known, render without shapefile
-    if coast_source == "mesh" and fort14_path is not None:
-        m = parse_fort14(fort14_path)
-        coast_paths = _compute_mesh_boundary_xy_paths(m)[1]
+    if coast_source in ("mesh", "mesh14") and fort14_path is not None:
+        if coast_source == "mesh14":
+            b = parse_fort14_boundaries(fort14_path)
+            coast_ids = classify_land_segments(b.land_segments).get('coast', [])
+            coast_paths = build_paths_from_segments(b.nodes_xy, coast_ids)
+        else:
+            m = parse_fort14(fort14_path)
+            coast_paths = _compute_mesh_boundary_xy_paths(m)[1]
         fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
         for arr in coast_paths:
             if isinstance(arr, np.ndarray) and arr.ndim == 2 and arr.shape[0] >= 2:
