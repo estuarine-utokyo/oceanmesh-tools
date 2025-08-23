@@ -451,7 +451,7 @@ def cmd_viz(args: argparse.Namespace) -> int:
         include_holes=getattr(args, "coast_include_holes", True),
         target_crs=getattr(args, "crs", None),
         coast_skip_near_openbnd=getattr(args, "coast_skip_near_openbnd", True),
-        coast_skip_tol=getattr(args, "coast_skip_tol", 0.01),
+        coast_skip_tol=(getattr(args, "coast_clip_eps", 1e-6) or getattr(args, "coast_skip_tol", 0.01)),
         ob_snap_to_hull=getattr(args, "ob_snap_to_hull", True),
         ob_snap_tol=getattr(args, "ob_snap_tol", 1e-3),
         audit_boundary=getattr(args, "audit_boundary", False),
@@ -480,6 +480,7 @@ def cmd_viz(args: argparse.Namespace) -> int:
                 target_crs=getattr(args, "crs", None),
                 coast_clip_to_domain=getattr(args, "coast_clip_to_domain", True),
                 fort14_path=fort14,
+                coast_clip_eps=getattr(args, "coast_clip_eps", 1e-6),
             )
         except Exception as e:
             print(f"Coastline overlay skipped: {e}")
@@ -538,6 +539,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=True,
         help="Include interior rings (holes) from polygons when plotting coastlines",
+    )
+    s_viz.add_argument(
+        "--coast-clip-to-domain",
+        action="store_true",
+        default=True,
+        help="Clip coastline to mesh domain polygon to avoid bridging across open boundaries",
+    )
+    s_viz.add_argument(
+        "--coast-clip-eps",
+        type=float,
+        default=1e-6,
+        help="Epsilon buffer for polygon clipping to keep boundary-coincident segments",
     )
     # Mesh overlays on mesh.png
     try:

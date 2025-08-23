@@ -268,7 +268,7 @@ def plot_mesh(
                     except Exception:
                         domain_poly = None
                 if domain_poly is not None:
-                    rings = _clip_lines_to_polygon(rings, domain_poly)
+                    rings = _clip_lines_to_polygon(rings, domain_poly, eps=coast_skip_tol if coast_skip_tol else 1e-6)
                 # Fallback: subtract near open boundary if requested
                 elif coast_skip_near_openbnd and openbnd_ml is not None:
                     try:
@@ -591,7 +591,7 @@ def _segments_from_geoms(geoms, include_holes: bool = False) -> List[np.ndarray]
     return segs
 
 
-def _clip_lines_to_polygon(rings: List[List[Tuple[float, float]]], poly) -> List[List[Tuple[float, float]]]:
+def _clip_lines_to_polygon(rings: List[List[Tuple[float, float]]], poly, eps: float = 1e-6) -> List[List[Tuple[float, float]]]:
     """Clip polyline rings to a polygon; explode results to LineStrings.
 
     Returns list of coordinate sequences inside the polygon. If shapely is not
@@ -604,12 +604,17 @@ def _clip_lines_to_polygon(rings: List[List[Tuple[float, float]]], poly) -> List
     if poly is None:
         return rings
     out: List[List[Tuple[float, float]]] = []
+    # Buffer polygon slightly so boundary-coincident segments survive clipping
+    try:
+        poly_b = poly.buffer(eps) if eps and hasattr(poly, "buffer") else poly
+    except Exception:
+        poly_b = poly
     for r in rings:
         if not r:
             continue
         try:
             ln = LineString(r)
-            inter = ln.intersection(poly)
+            inter = ln.intersection(poly_b)
         except Exception:
             out.append(r)
             continue
@@ -697,6 +702,7 @@ def plot_coastline_overlay(
     target_crs: Optional[str] = None,
     coast_clip_to_domain: bool = True,
     fort14_path: Optional[Path] = None,
+    coast_clip_eps: float = 1e-6,
 ) -> Path:
     if gpd is None:
         raise RuntimeError("geopandas is required to plot coastline overlay")
@@ -728,7 +734,7 @@ def plot_coastline_overlay(
             except Exception:
                 domain_poly = None
         if domain_poly is not None:
-            rings = _clip_lines_to_polygon(rings, domain_poly)
+            rings = _clip_lines_to_polygon(rings, domain_poly, eps=coast_clip_eps if coast_clip_eps else 1e-6)
         # Plot
         for coords in rings:
             arr = np.asarray(coords)
