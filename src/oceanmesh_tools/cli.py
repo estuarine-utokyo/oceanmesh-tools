@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 
-from .config import load_config, region_paths
+from .config import load_config, region_paths, DEFAULT_REGION
 from .io.fort14 import mesh_bbox_from_fort14, parse_fort14
 from .scan.matlab_inputs import scan_matlab_scripts, extract_from_file
 from .scan.resolve_paths import resolve_candidates, pick_best_by_iou
@@ -141,7 +141,7 @@ def cmd_scan(args: argparse.Namespace) -> int:
     }
     conf = load_config(cli_conf)
     oceanmesh2d_dir = conf.get("oceanmesh2d_dir") or os.path.join(str(Path.home()), "Github", "OceanMesh2D")
-    region = conf.get("default_region")
+    region = conf.get("default_region") or DEFAULT_REGION
 
     region_root, region_data, datasets = region_paths(oceanmesh2d_dir, region)
     scan_root = region_root
@@ -325,7 +325,7 @@ def _resolve_viz_inputs(
     explicit > script > catalog > auto-detect.
     """
     oceanmesh2d_dir = conf.get("oceanmesh2d_dir") or os.path.join(str(Path.home()), "Github", "OceanMesh2D")
-    region = conf.get("default_region")
+    region = conf.get("default_region") or DEFAULT_REGION
     extra_shp = conf.get("search_paths", {}).get("shp", [])
     extra_dem = conf.get("search_paths", {}).get("dem", [])
 
@@ -442,9 +442,13 @@ def cmd_viz(args: argparse.Namespace) -> int:
     add_all = getattr(args, "mesh_add_all", False)
     add_coast = getattr(args, "mesh_add_coastline", True) or add_all
     add_open = getattr(args, "mesh_add_open_boundaries", True) or add_all
-    mesh_png = plot_mesh(
-        fort14,
-        outdir,
+    # Build kwargs and filter by viz.plot_mesh signature to avoid TypeError when CLI/viz evolve
+    import inspect as _inspect
+    from .plot import viz as _viz_mod
+    _sig = _inspect.signature(_viz_mod.plot_mesh)
+    _kw = dict(
+        f14_path=fort14,
+        outdir=outdir,
         coastline_path=shp_path if add_coast else None,
         mesh_add_coastline=add_coast,
         mesh_add_open_boundaries=add_open,
@@ -459,6 +463,8 @@ def cmd_viz(args: argparse.Namespace) -> int:
         coast_subtract_near_ob=getattr(args, "coast_subtract_near_ob", True),
         coast_subtract_tol=getattr(args, "coast_subtract_tol", 0.002),
     )
+    _kw = {k: v for k, v in _kw.items() if k in _sig.parameters}
+    mesh_png = _viz_mod.plot_mesh(**_kw)
     ob_png = plot_open_boundaries(fort14, outdir)
     if dem_path and dem_path.exists():
         try:
@@ -538,6 +544,11 @@ def build_parser() -> argparse.ArgumentParser:
     s_viz.add_argument("--script", help="Path to generating MATLAB script (.m)")
     s_viz.add_argument("--dem", help="DEM path or 'auto'", default="auto")
     s_viz.add_argument("--shp", help="Shapefile path/dir or 'auto'", default="auto")
+    # Boolean optional action support (Python >=3.9); fallback to store_true on older/limited argparse
+    try:
+        BooleanOptionalAction_not_used = None
+    except Exception:  # pragma: no cover
+        bool_action = 'store_true'
     s_viz.add_argument(
         "--coast-include-holes",
         action="store_true",
@@ -546,7 +557,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s_viz.add_argument(
         "--coast-subtract-near-ob",
-        action=bool_action,  # type: ignore[arg-type]
+        action=BoolAction,  # type: ignore[arg-type]
         default=True,
         help="Subtract a thin buffer around open boundary from coastline to avoid overlap",
     )
@@ -570,19 +581,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     # Mesh overlays on mesh.png
     try:
-        from argparse import BooleanOptionalAction  # type: ignore
-        bool_action = BooleanOptionalAction
+        BooleanOptionalAction_not_used = None
     except Exception:  # pragma: no cover
         bool_action = 'store_true'
     s_viz.add_argument(
         "--mesh-add-coastline",
-        action=bool_action,  # type: ignore[arg-type]
+        action=BoolAction,  # type: ignore[arg-type]
         default=True,
         help="Overlay coastline (red) on mesh.png",
     )
     s_viz.add_argument(
         "--mesh-add-open-boundaries",
-        action=bool_action,  # type: ignore[arg-type]
+        action=BoolAction,  # type: ignore[arg-type]
         default=True,
         help="Overlay open boundaries (blue) on mesh.png",
     )
@@ -593,7 +603,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     s_viz.add_argument(
         "--coast-skip-near-openbnd",
-        action=bool_action,  # type: ignore[arg-type]
+        action=BoolAction,  # type: ignore[arg-type]
         default=True,
         help="Skip coastline rings that lie within tolerance of open boundary when overlaying on mesh",
     )
@@ -631,3 +641,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
+"""Argparse boolean optional action polyfill.
+
+Uses argparse.BooleanOptionalAction when available; otherwise defines a minimal
+BoolAction that sets the value to True when the flag is present.
+"""
+try:  # Python 3.9+
+    from argparse import BooleanOptionalAction as BoolAction  # type: ignore
+except Exception:  # pragma: no cover
+    class BoolAction(argparse.Action):  # type: ignore
+        def __init__(self, option_strings, dest, default=None, **kwargs):
+            kwargs.pop("nargs", None)
+            super().__init__(option_strings, dest, nargs=0, default=default, **kwargs)
+
+        def __call__(self, parser, namespace, values, option_string=None):
+            setattr(namespace, self.dest, True)

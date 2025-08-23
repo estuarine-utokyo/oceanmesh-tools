@@ -184,6 +184,8 @@ def plot_mesh(
     ob_snap_tol: float = 1e-3,
     audit_boundary: bool = False,
     coast_clip_to_domain: bool = True,
+    coast_subtract_near_ob: bool = True,
+    coast_subtract_tol: float = 0.002,
 ) -> Path:
     _ensure_outdir(outdir)
     mesh = parse_fort14(f14_path)
@@ -261,8 +263,8 @@ def plot_mesh(
             color="r",
             zorder=5,
             clip_eps=coast_skip_tol if coast_skip_tol else 1e-6,
-            subtract_near_ob=coast_skip_near_openbnd,
-            subtract_tol=coast_skip_tol if coast_skip_tol else 0.0,
+            subtract_near_ob=coast_subtract_near_ob,
+            subtract_tol=coast_subtract_tol,
         )
         # If geopandas unavailable, silently skip coastline overlay
     if mesh_add_open_boundaries and openbnd_paths:
