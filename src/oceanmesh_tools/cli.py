@@ -462,6 +462,8 @@ def cmd_viz(args: argparse.Namespace) -> int:
         coast_clip_to_domain=getattr(args, "coast_clip_to_domain", True),
         coast_subtract_near_ob=getattr(args, "coast_subtract_near_ob", True),
         coast_subtract_tol=getattr(args, "coast_subtract_tol", 0.002),
+        coast_source=getattr(args, "coast_source", "mesh"),
+        coast_shp_background=Path(getattr(args, "coast_shp_background")) if getattr(args, "coast_shp_background", None) else None,
     )
     _kw = {k: v for k, v in _kw.items() if k in _sig.parameters}
     mesh_png = _viz_mod.plot_mesh(**_kw)
@@ -491,6 +493,8 @@ def cmd_viz(args: argparse.Namespace) -> int:
                 coast_clip_eps=getattr(args, "coast_clip_eps", 1e-6),
                 coast_subtract_near_ob=getattr(args, "coast_subtract_near_ob", True),
                 coast_subtract_tol=getattr(args, "coast_subtract_tol", 0.002),
+                coast_source=getattr(args, "coast_source", "mesh"),
+                coast_shp_background=Path(getattr(args, "coast_shp_background")) if getattr(args, "coast_shp_background", None) else None,
             )
         except Exception as e:
             print(f"Coastline overlay skipped: {e}")
@@ -544,6 +548,8 @@ def build_parser() -> argparse.ArgumentParser:
     s_viz.add_argument("--script", help="Path to generating MATLAB script (.m)")
     s_viz.add_argument("--dem", help="DEM path or 'auto'", default="auto")
     s_viz.add_argument("--shp", help="Shapefile path/dir or 'auto'", default="auto")
+    s_viz.add_argument("--coast-source", choices=["mesh", "shp"], default="mesh", help="Source for coastline: mesh boundary edges or shapefile")
+    s_viz.add_argument("--coast-shp-background", help="Optional shapefile background for mesh-derived coastline", default=None)
     # Boolean optional action support (Python >=3.9); fallback to store_true on older/limited argparse
     try:
         BooleanOptionalAction_not_used = None

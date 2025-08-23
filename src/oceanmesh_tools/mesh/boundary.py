@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from typing import Dict, Iterable, List, Sequence, Tuple
+import numpy as np
 
 
 def build_edge_counts(elements: Sequence[Tuple[int, int, int, int, int]]) -> Dict[Tuple[int, int], int]:
@@ -91,6 +92,126 @@ def compute_outer_loops(elements: Sequence[Tuple[int, int, int, int, int]]) -> L
     if len(seen) >= 3:
         return [seen + [seen[0]]]
     return []
+
+
+def boundary_edges_from_tris(tris: np.ndarray) -> np.ndarray:
+    """Return undirected boundary edges from triangulation (0-based indices).
+
+    tris: (M,3) int array of node indices (0-based).
+    Returns: (K,2) int32 array of undirected edges with count==1.
+    """
+    if tris.size == 0:
+        return np.empty((0, 2), dtype=np.int32)
+    e = np.vstack([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]]).astype(np.int32)
+    e.sort(axis=1)
+    uniq, cnt = np.unique(e, axis=0, return_counts=True)
+    return uniq[cnt == 1].astype(np.int32)
+
+
+def chain_edges_to_paths(edges: np.ndarray) -> List[List[int]]:
+    """Chain undirected edges (K,2) into ordered paths of node indices (0-based).
+
+    Produces both open paths (start/end degree==1) and closed loops.
+    """
+    if edges.size == 0:
+        return []
+    nbrs: Dict[int, List[int]] = defaultdict(list)
+    for i, j in edges.tolist():
+        nbrs[i].append(j)
+        nbrs[j].append(i)
+    used = set()
+    def ek(i: int, j: int) -> Tuple[int, int]:
+        return (i, j) if i < j else (j, i)
+
+    paths: List[List[int]] = []
+    # Start with open chains (degree==1)
+    starts = [n for n, vs in nbrs.items() if len(vs) == 1]
+    for s in starts:
+        if all(ek(s, v) in used for v in nbrs[s]):
+            continue
+        path = [s]
+        cur = s
+        prev = None
+        while True:
+            nexts = [v for v in nbrs[cur] if ek(cur, v) not in used and v != prev]
+            if not nexts:
+                break
+            v = nexts[0]
+            used.add(ek(cur, v))
+            path.append(v)
+            prev, cur = cur, v
+        if len(path) >= 2:
+            paths.append(path)
+    # Remaining cycles
+    for n in list(nbrs.keys()):
+        for v in nbrs[n]:
+            if ek(n, v) in used:
+                continue
+            # start a loop
+            path = [n]
+            cur = n
+            prev = None
+            while True:
+                nexts = [w for w in nbrs[cur] if ek(cur, w) not in used and w != prev]
+                if not nexts:
+                    break
+                w = nexts[0]
+                used.add(ek(cur, w))
+                path.append(w)
+                prev, cur = cur, w
+                if cur == path[0]:
+                    break
+            if len(path) >= 2:
+                # ensure closed loop repeats start
+                if path[0] != path[-1] and path[0] in nbrs.get(path[-1], []):
+                    path.append(path[0])
+                paths.append(path)
+    return paths
+
+
+def classify_open_boundary_edges(
+    paths: List[List[int]],
+    ob_segments: List[List[int]],
+) -> Tuple[List[List[int]], List[List[int]]]:
+    """Split boundary paths into (open_paths, coast_paths) by edge membership.
+
+    Any consecutive edge (i,j) that appears in fort.14 open-boundary segments
+    (1-based node ids) is labeled as 'open'; others as 'coast'. Paths are split
+    when label changes to keep homogenous polylines.
+    """
+    ob_edges: set[Tuple[int, int]] = set()
+    for seg in ob_segments:
+        if not seg:
+            continue
+        for a, b in zip(seg[:-1], seg[1:]):
+            i, j = int(a) - 1, int(b) - 1
+            if i == j:
+                continue
+            t = (i, j) if i < j else (j, i)
+            ob_edges.add(t)
+    open_paths: List[List[int]] = []
+    coast_paths: List[List[int]] = []
+    for path in paths:
+        if len(path) < 2:
+            continue
+        cur_label = None
+        cur_seq: List[int] = [path[0]]
+        def commit(seq: List[int], lbl):
+            if len(seq) >= 2:
+                (open_paths if lbl == 'open' else coast_paths).append(seq.copy())
+        for u, v in zip(path[:-1], path[1:]):
+            e = (u, v) if u < v else (v, u)
+            lbl = 'open' if e in ob_edges else 'coast'
+            if cur_label is None:
+                cur_label = lbl
+            if lbl != cur_label:
+                commit(cur_seq, cur_label)
+                cur_seq = [u, v]
+                cur_label = lbl
+            else:
+                cur_seq.append(v)
+        commit(cur_seq, cur_label)
+    return open_paths, coast_paths
 
 
 def classify_outer_vs_holes(loops: Sequence[List[int]], nodes_xy: Dict[int, Tuple[float, float]]) -> Tuple[List[List[int]], List[List[int]]]:
