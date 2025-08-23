@@ -456,6 +456,8 @@ def cmd_viz(args: argparse.Namespace) -> int:
         ob_snap_tol=getattr(args, "ob_snap_tol", 1e-3),
         audit_boundary=getattr(args, "audit_boundary", False),
         coast_clip_to_domain=getattr(args, "coast_clip_to_domain", True),
+        coast_subtract_near_ob=getattr(args, "coast_subtract_near_ob", True),
+        coast_subtract_tol=getattr(args, "coast_subtract_tol", 0.002),
     )
     ob_png = plot_open_boundaries(fort14, outdir)
     if dem_path and dem_path.exists():
@@ -481,6 +483,8 @@ def cmd_viz(args: argparse.Namespace) -> int:
                 coast_clip_to_domain=getattr(args, "coast_clip_to_domain", True),
                 fort14_path=fort14,
                 coast_clip_eps=getattr(args, "coast_clip_eps", 1e-6),
+                coast_subtract_near_ob=getattr(args, "coast_subtract_near_ob", True),
+                coast_subtract_tol=getattr(args, "coast_subtract_tol", 0.002),
             )
         except Exception as e:
             print(f"Coastline overlay skipped: {e}")
@@ -539,6 +543,18 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         default=True,
         help="Include interior rings (holes) from polygons when plotting coastlines",
+    )
+    s_viz.add_argument(
+        "--coast-subtract-near-ob",
+        action=bool_action,  # type: ignore[arg-type]
+        default=True,
+        help="Subtract a thin buffer around open boundary from coastline to avoid overlap",
+    )
+    s_viz.add_argument(
+        "--coast-subtract-tol",
+        type=float,
+        default=0.002,
+        help="Tolerance for subtracting coastline near open boundary (mesh CRS units)",
     )
     s_viz.add_argument(
         "--coast-clip-to-domain",

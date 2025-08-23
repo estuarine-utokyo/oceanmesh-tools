@@ -31,6 +31,7 @@ from ..mesh.boundary import (
     walk_closed_loops,
     classify_outer_vs_holes,
     compute_outer_loops,
+    make_domain_polygon,
 )
 
 
@@ -243,44 +244,26 @@ def plot_mesh(
         openbnd_paths = snapped_paths
 
     if mesh_add_coastline and coastline_path is not None and coastline_path.exists():
-        if gpd is not None:
+        domain_poly = None
+        if coast_clip_to_domain:
             try:
-                gdf = gpd.read_file(coastline_path)  # type: ignore
-                try:
-                    if target_crs:
-                        gdf = gdf.to_crs(target_crs)  # type: ignore
-                    else:
-                        gdf = gdf.to_crs(epsg=4326)  # type: ignore
-                except Exception:
-                    pass
-                # Build ring coords, then clip/subtract as configured, then plot
-                segs = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
-                rings: List[List[Tuple[float, float]]] = []
-                for s in segs:
-                    if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
-                        rings.append([(float(x), float(y)) for x, y in s[:, :2]])
-                # Prefer clipping to domain polygon when available
-                domain_poly = None
-                if coast_clip_to_domain:
-                    try:
-                        loops2 = compute_outer_loops(mesh.elements)
-                        domain_poly = make_domain_polygon(nodes_xy, loops2)
-                    except Exception:
-                        domain_poly = None
-                if domain_poly is not None:
-                    rings = _clip_lines_to_polygon(rings, domain_poly, eps=coast_skip_tol if coast_skip_tol else 1e-6)
-                # Fallback: subtract near open boundary if requested
-                elif coast_skip_near_openbnd and openbnd_ml is not None:
-                    try:
-                        eraser = openbnd_ml.buffer(coast_skip_tol, cap_style=2, join_style=2)  # type: ignore
-                    except Exception:
-                        eraser = None
-                    rings = _subtract_near_openbnd(rings, eraser)
-                for coords in rings:
-                    arr = np.asarray(coords)
-                    ax.plot(arr[:, 0], arr[:, 1], color="r", linestyle="-", zorder=5, solid_joinstyle='round', solid_capstyle='round')
+                loops2 = compute_outer_loops(mesh.elements)
+                domain_poly = make_domain_polygon(nodes_xy, loops2)
             except Exception:
-                pass
+                domain_poly = None
+        _render_coastline(
+            ax,
+            coastline_path,
+            include_holes,
+            target_crs,
+            domain_poly,
+            openbnd_ml,
+            color="r",
+            zorder=5,
+            clip_eps=coast_skip_tol if coast_skip_tol else 1e-6,
+            subtract_near_ob=coast_skip_near_openbnd,
+            subtract_tol=coast_skip_tol if coast_skip_tol else 0.0,
+        )
         # If geopandas unavailable, silently skip coastline overlay
     if mesh_add_open_boundaries and openbnd_paths:
         for s in openbnd_paths:
@@ -633,6 +616,62 @@ def _clip_lines_to_polygon(rings: List[List[Tuple[float, float]]], poly, eps: fl
     return out
 
 
+def _render_coastline(
+    ax,
+    coastline_path: Path,
+    include_holes: bool,
+    target_crs: Optional[str],
+    domain_poly,
+    openbnd_ml,
+    color: str,
+    zorder: int,
+    clip_eps: float,
+    subtract_near_ob: bool,
+    subtract_tol: float,
+):
+    if gpd is None:
+        return
+    try:
+        gdf = gpd.read_file(coastline_path)  # type: ignore
+        try:
+            if target_crs:
+                gdf = gdf.to_crs(target_crs)  # type: ignore
+            else:
+                gdf = gdf.to_crs(epsg=4326)  # type: ignore
+        except Exception:
+            pass
+        segs = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
+        rings: List[List[Tuple[float, float]]] = []
+        for s in segs:
+            if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
+                rings.append([(float(x), float(y)) for x, y in s[:, :2]])
+        # Clip to domain when available
+        if domain_poly is not None:
+            rings = _clip_lines_to_polygon(rings, domain_poly, eps=clip_eps if clip_eps else 1e-6)
+        # Optionally subtract near open boundary
+        if subtract_near_ob and openbnd_ml is not None and subtract_tol and subtract_tol > 0:
+            try:
+                eraser = openbnd_ml.buffer(subtract_tol, cap_style=2, join_style=2)  # type: ignore
+            except Exception:
+                eraser = None
+            if eraser is not None:
+                rings = _subtract_near_openbnd(rings, eraser)
+        # Plot
+        for coords in rings:
+            arr = np.asarray(coords)
+            ax.plot(
+                arr[:, 0],
+                arr[:, 1],
+                color=color,
+                linestyle="-",
+                zorder=zorder,
+                solid_joinstyle='round',
+                solid_capstyle='round',
+            )
+    except Exception:
+        pass
+
+
 def _plot_lines(ax, lines: List[np.ndarray], color: str = "C0", lw: float = 0.5, zorder: int = 2):
     if not lines:
         return
@@ -703,6 +742,8 @@ def plot_coastline_overlay(
     coast_clip_to_domain: bool = True,
     fort14_path: Optional[Path] = None,
     coast_clip_eps: float = 1e-6,
+    coast_subtract_near_ob: bool = True,
+    coast_subtract_tol: float = 0.002,
 ) -> Path:
     if gpd is None:
         raise RuntimeError("geopandas is required to plot coastline overlay")
@@ -717,32 +758,37 @@ def plot_coastline_overlay(
     except Exception:
         pass
     fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
-    # Draw each boundary independently; no implicit joins. Optionally clip to mesh domain polygon.
-    try:
-        segments = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
-        rings: List[List[Tuple[float, float]]] = []
-        for s in segments:
-            if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
-                rings.append([(float(x), float(y)) for x, y in s[:, :2]])
-        domain_poly = None
-        if coast_clip_to_domain and fort14_path is not None:
-            try:
-                m = parse_fort14(fort14_path)
-                nodes_xy = {nid: (x, y) for nid, x, y, _ in m.nodes}
-                loops2 = compute_outer_loops(m.elements)
-                domain_poly = make_domain_polygon(nodes_xy, loops2)
-            except Exception:
-                domain_poly = None
-        if domain_poly is not None:
-            rings = _clip_lines_to_polygon(rings, domain_poly, eps=coast_clip_eps if coast_clip_eps else 1e-6)
-        # Plot
-        for coords in rings:
-            arr = np.asarray(coords)
-            ax.plot(arr[:, 0], arr[:, 1], color="C0", linewidth=0.6, zorder=2)
-    except Exception:
-        # Fallback via LineCollection if plotting as individual lines fails
-        segments = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
-        _plot_lines(ax, segments, color="C0", lw=0.5, zorder=2)
+    # Draw coastline using shared pipeline
+    domain_poly = None
+    openbnd_ml = None
+    if coast_clip_to_domain and fort14_path is not None:
+        try:
+            m = parse_fort14(fort14_path)
+            nodes_xy = {nid: (x, y) for nid, x, y, _ in m.nodes}
+            loops2 = compute_outer_loops(m.elements)
+            domain_poly = make_domain_polygon(nodes_xy, loops2)
+            # Build open-boundary MultiLine for optional subtraction
+            paths = _build_open_boundary_segments(m)
+            if paths:
+                from shapely.geometry import LineString  # type: ignore
+                from shapely.ops import unary_union  # type: ignore
+                openbnd_ml = unary_union([LineString(p[:, :2]) for p in paths if isinstance(p, np.ndarray) and p.shape[1] >= 2])
+        except Exception:
+            domain_poly = None
+            openbnd_ml = None
+    _render_coastline(
+        ax,
+        shp_path,
+        include_holes,
+        target_crs,
+        domain_poly,
+        openbnd_ml,
+        color="C0",
+        zorder=2,
+        clip_eps=coast_clip_eps if coast_clip_eps else 1e-6,
+        subtract_near_ob=coast_subtract_near_ob,
+        subtract_tol=coast_subtract_tol,
+    )
     ax.set_title("Coastline Overlay")
     ax.set_xlabel("Lon/X")
     ax.set_ylabel("Lat/Y")
