@@ -25,6 +25,13 @@ except Exception:  # pragma: no cover
     xr = None
 
 from ..io.fort14 import Fort14, parse_fort14
+from ..mesh.boundary import (
+    build_edge_counts,
+    boundary_edges_from_counts,
+    walk_closed_loops,
+    classify_outer_vs_holes,
+    compute_outer_loops,
+)
 
 
 def _split_polyline_on_gaps(arr: np.ndarray) -> List[np.ndarray]:
@@ -172,6 +179,10 @@ def plot_mesh(
     target_crs: Optional[str] = None,
     coast_skip_near_openbnd: bool = True,
     coast_skip_tol: float = 0.01,
+    ob_snap_to_hull: bool = True,
+    ob_snap_tol: float = 1e-3,
+    audit_boundary: bool = False,
+    coast_clip_to_domain: bool = True,
 ) -> Path:
     _ensure_outdir(outdir)
     mesh = parse_fort14(f14_path)
@@ -195,6 +206,42 @@ def plot_mesh(
         except Exception:
             openbnd_ml = None
 
+    # Compute mesh outer hull from connectivity
+    nodes_xy = {nid: (x, y) for nid, x, y, _ in mesh.nodes}
+    outer_paths_xy: List[List[Tuple[float, float]]] = []
+    try:
+        loops = compute_outer_loops(mesh.elements)
+        outer, holes = classify_outer_vs_holes(loops, nodes_xy)
+        for loop in outer:
+            coords = [(nodes_xy[i][0], nodes_xy[i][1]) for i in loop]
+            outer_paths_xy.append(coords)
+    except Exception:
+        pass
+
+    # Optional snap of open boundaries to hull
+    snapped_paths: List[np.ndarray] = []
+    if openbnd_paths and outer_paths_xy and ob_snap_to_hull:
+        try:
+            from shapely.geometry import MultiLineString, Point, LineString  # type: ignore
+            from shapely.ops import unary_union, nearest_points  # type: ignore
+            hull_ml = MultiLineString(outer_paths_xy)
+            if openbnd_ml is not None and float(openbnd_ml.hausdorff_distance(hull_ml)) <= ob_snap_tol:
+                for p in openbnd_paths:
+                    snapped = []
+                    for x, y in p[:, :2]:
+                        a, b = nearest_points(Point(float(x), float(y)), hull_ml)
+                        snapped.append((b.x, b.y))
+                    snapped_paths.append(np.asarray(snapped, dtype=float))
+                # Replace openbnd_ml with snapped
+                try:
+                    openbnd_ml = unary_union([LineString(s[:, :2]) for s in snapped_paths])
+                except Exception:
+                    pass
+        except Exception:
+            pass
+    if snapped_paths:
+        openbnd_paths = snapped_paths
+
     if mesh_add_coastline and coastline_path is not None and coastline_path.exists():
         if gpd is not None:
             try:
@@ -206,14 +253,24 @@ def plot_mesh(
                         gdf = gdf.to_crs(epsg=4326)  # type: ignore
                 except Exception:
                     pass
-                # Build ring coords, filter near open boundary if requested, then plot
+                # Build ring coords, then clip/subtract as configured, then plot
                 segs = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
                 rings: List[List[Tuple[float, float]]] = []
                 for s in segs:
                     if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
                         rings.append([(float(x), float(y)) for x, y in s[:, :2]])
-                # Apply subtraction near open boundary rather than dropping the entire ring
-                if coast_skip_near_openbnd and openbnd_ml is not None:
+                # Prefer clipping to domain polygon when available
+                domain_poly = None
+                if coast_clip_to_domain:
+                    try:
+                        loops2 = compute_outer_loops(mesh.elements)
+                        domain_poly = make_domain_polygon(nodes_xy, loops2)
+                    except Exception:
+                        domain_poly = None
+                if domain_poly is not None:
+                    rings = _clip_lines_to_polygon(rings, domain_poly)
+                # Fallback: subtract near open boundary if requested
+                elif coast_skip_near_openbnd and openbnd_ml is not None:
                     try:
                         eraser = openbnd_ml.buffer(coast_skip_tol, cap_style=2, join_style=2)  # type: ignore
                     except Exception:
@@ -237,6 +294,53 @@ def plot_mesh(
     fig.tight_layout()
     fig.savefig(png)
     plt.close(fig)
+    # Optional audit plot
+    if audit_boundary and (outer_paths_xy or openbnd_paths):
+        try:
+            fig2, ax2 = plt.subplots(figsize=(8, 6), dpi=150)
+            # Light mesh
+            for _, n1, n2, n3, _ in mesh.elements:
+                ax2.plot([xs[n1], xs[n2]], [ys[n1], ys[n2]], color="#cccccc", linewidth=0.1, zorder=1)
+                ax2.plot([xs[n2], xs[n3]], [ys[n2], ys[n3]], color="#cccccc", linewidth=0.1, zorder=1)
+                ax2.plot([xs[n3], xs[n1]], [ys[n3], ys[n1]], color="#cccccc", linewidth=0.1, zorder=1)
+            # Hull outer
+            for ring in outer_paths_xy:
+                arr = np.asarray(ring)
+                ax2.plot(arr[:, 0], arr[:, 1], color="c", linestyle="-", zorder=7, linewidth=1.0)
+            # OB original (if snapped applied, also show original)
+            if openbnd_paths and snapped_paths:
+                for s in _build_open_boundary_segments(mesh):
+                    if s.shape[0] >= 2:
+                        ax2.plot(s[:, 0], s[:, 1], color="#77bbff", linestyle="--", zorder=8, linewidth=0.8)
+                for s in openbnd_paths:
+                    ax2.plot(s[:, 0], s[:, 1], color="b", linestyle="-", zorder=9)
+            elif openbnd_paths:
+                for s in openbnd_paths:
+                    ax2.plot(s[:, 0], s[:, 1], color="b", linestyle="-", zorder=9)
+            # Coastline (if provided)
+            if mesh_add_coastline and coastline_path is not None and coastline_path.exists() and gpd is not None:
+                try:
+                    gdf = gpd.read_file(coastline_path)  # type: ignore
+                    try:
+                        if target_crs:
+                            gdf = gdf.to_crs(target_crs)  # type: ignore
+                        else:
+                            gdf = gdf.to_crs(epsg=4326)  # type: ignore
+                    except Exception:
+                        pass
+                    segs = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
+                    for s in segs:
+                        if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
+                            ax2.plot(s[:, 0], s[:, 1], color="r", linestyle="-", zorder=6)
+                except Exception:
+                    pass
+            ax2.set_aspect("equal", adjustable="box")
+            audit_png = outdir / "boundary_audit.png"
+            fig2.tight_layout()
+            fig2.savefig(audit_png)
+            plt.close(fig2)
+        except Exception:
+            pass
     return png
 
 
@@ -487,6 +591,43 @@ def _segments_from_geoms(geoms, include_holes: bool = False) -> List[np.ndarray]
     return segs
 
 
+def _clip_lines_to_polygon(rings: List[List[Tuple[float, float]]], poly) -> List[List[Tuple[float, float]]]:
+    """Clip polyline rings to a polygon; explode results to LineStrings.
+
+    Returns list of coordinate sequences inside the polygon. If shapely is not
+    available or poly is None, returns rings unchanged.
+    """
+    try:
+        from shapely.geometry import LineString  # type: ignore
+    except Exception:  # pragma: no cover
+        return rings
+    if poly is None:
+        return rings
+    out: List[List[Tuple[float, float]]] = []
+    for r in rings:
+        if not r:
+            continue
+        try:
+            ln = LineString(r)
+            inter = ln.intersection(poly)
+        except Exception:
+            out.append(r)
+            continue
+        if getattr(inter, "is_empty", False):
+            continue
+        if getattr(inter, "geom_type", "") == "LineString":
+            coords = list(inter.coords)
+            if len(coords) >= 2:
+                out.append([(float(x), float(y)) for (x, y) in coords])
+        else:
+            for g in getattr(inter, "geoms", []):
+                if getattr(g, "geom_type", "") == "LineString" and not getattr(g, "is_empty", False):
+                    coords = list(g.coords)
+                    if len(coords) >= 2:
+                        out.append([(float(x), float(y)) for (x, y) in coords])
+    return out
+
+
 def _plot_lines(ax, lines: List[np.ndarray], color: str = "C0", lw: float = 0.5, zorder: int = 2):
     if not lines:
         return
@@ -554,6 +695,8 @@ def plot_coastline_overlay(
     outdir: Path,
     include_holes: bool = True,
     target_crs: Optional[str] = None,
+    coast_clip_to_domain: bool = True,
+    fort14_path: Optional[Path] = None,
 ) -> Path:
     if gpd is None:
         raise RuntimeError("geopandas is required to plot coastline overlay")
@@ -568,9 +711,28 @@ def plot_coastline_overlay(
     except Exception:
         pass
     fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
-    # Draw each boundary independently; no implicit joins
+    # Draw each boundary independently; no implicit joins. Optionally clip to mesh domain polygon.
     try:
-        plot_geoms_as_lines(ax, gdf.geometry, include_holes=include_holes, color="C0", linewidth=0.6, zorder=2)  # type: ignore
+        segments = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
+        rings: List[List[Tuple[float, float]]] = []
+        for s in segments:
+            if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
+                rings.append([(float(x), float(y)) for x, y in s[:, :2]])
+        domain_poly = None
+        if coast_clip_to_domain and fort14_path is not None:
+            try:
+                m = parse_fort14(fort14_path)
+                nodes_xy = {nid: (x, y) for nid, x, y, _ in m.nodes}
+                loops2 = compute_outer_loops(m.elements)
+                domain_poly = make_domain_polygon(nodes_xy, loops2)
+            except Exception:
+                domain_poly = None
+        if domain_poly is not None:
+            rings = _clip_lines_to_polygon(rings, domain_poly)
+        # Plot
+        for coords in rings:
+            arr = np.asarray(coords)
+            ax.plot(arr[:, 0], arr[:, 1], color="C0", linewidth=0.6, zorder=2)
     except Exception:
         # Fallback via LineCollection if plotting as individual lines fails
         segments = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore

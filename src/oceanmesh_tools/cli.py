@@ -452,6 +452,10 @@ def cmd_viz(args: argparse.Namespace) -> int:
         target_crs=getattr(args, "crs", None),
         coast_skip_near_openbnd=getattr(args, "coast_skip_near_openbnd", True),
         coast_skip_tol=getattr(args, "coast_skip_tol", 0.01),
+        ob_snap_to_hull=getattr(args, "ob_snap_to_hull", True),
+        ob_snap_tol=getattr(args, "ob_snap_tol", 1e-3),
+        audit_boundary=getattr(args, "audit_boundary", False),
+        coast_clip_to_domain=getattr(args, "coast_clip_to_domain", True),
     )
     ob_png = plot_open_boundaries(fort14, outdir)
     if dem_path and dem_path.exists():
@@ -474,6 +478,8 @@ def cmd_viz(args: argparse.Namespace) -> int:
                 outdir,
                 include_holes=getattr(args, "coast_include_holes", False),
                 target_crs=getattr(args, "crs", None),
+                coast_clip_to_domain=getattr(args, "coast_clip_to_domain", True),
+                fort14_path=fort14,
             )
         except Exception as e:
             print(f"Coastline overlay skipped: {e}")
@@ -571,6 +577,15 @@ def build_parser() -> argparse.ArgumentParser:
     s_viz.add_argument("--out", help="Output directory for figures")
     s_viz.add_argument("--crs", help="Target CRS like EPSG:4326", default="EPSG:4326")
     s_viz.add_argument("--require-inputs", action="store_true", help="Fail (non-zero) if DEM/Shape unresolved and show resolution attempts")
+    s_viz.add_argument("--audit-boundary", action="store_true", default=False, help="Write boundary audit figure")
+    # Open-boundary snapping options
+    try:
+        from argparse import BooleanOptionalAction  # type: ignore
+        bool_action2 = BooleanOptionalAction
+    except Exception:
+        bool_action2 = 'store_true'
+    s_viz.add_argument("--ob-snap-to-hull", action=bool_action2, default=True, help="Snap open boundary to mesh hull when close enough")
+    s_viz.add_argument("--ob-snap-tol", type=float, default=1e-3, help="Tolerance for snapping (mesh CRS units)")
     s_viz.set_defaults(func=cmd_viz)
 
     return p
