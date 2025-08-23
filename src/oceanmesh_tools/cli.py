@@ -464,6 +464,9 @@ def cmd_viz(args: argparse.Namespace) -> int:
         coast_subtract_tol=getattr(args, "coast_subtract_tol", 0.002),
         coast_source=getattr(args, "coast_source", "mesh"),
         coast_shp_background=Path(getattr(args, "coast_shp_background")) if getattr(args, "coast_shp_background", None) else None,
+        include_ibtype=tuple(getattr(args, 'include_ibtype', [20, 21])),
+        debug_boundaries=getattr(args, 'debug_boundaries', False),
+        edge_length_threshold_deg=getattr(args, 'edge_length_threshold_deg', 1.5),
     )
     _kw = {k: v for k, v in _kw.items() if k in _sig.parameters}
     mesh_png = _viz_mod.plot_mesh(**_kw)
@@ -495,6 +498,9 @@ def cmd_viz(args: argparse.Namespace) -> int:
                 coast_subtract_tol=getattr(args, "coast_subtract_tol", 0.002),
                 coast_source=getattr(args, "coast_source", "mesh"),
                 coast_shp_background=Path(getattr(args, "coast_shp_background")) if getattr(args, "coast_shp_background", None) else None,
+                include_ibtype=tuple(getattr(args, 'include_ibtype', [20, 21])),
+                debug_boundaries=getattr(args, 'debug_boundaries', False),
+                edge_length_threshold_deg=getattr(args, 'edge_length_threshold_deg', 1.5),
             )
         except Exception as e:
             print(f"Coastline overlay skipped: {e}")
@@ -550,6 +556,27 @@ def build_parser() -> argparse.ArgumentParser:
     s_viz.add_argument("--shp", help="Shapefile path/dir or 'auto'", default="auto")
     s_viz.add_argument("--coast-source", choices=["mesh14", "mesh", "shp"], default="mesh14", help="Source for coastline: mesh-derived via fort.14, boundary edges, or shapefile")
     s_viz.add_argument("--coast-shp-background", help="Optional shapefile background for mesh-derived coastline", default=None)
+    # Boundary debugging / hardening
+    s_viz.add_argument(
+        "--debug-boundaries",
+        dest="debug_boundaries",
+        action=BoolAction,  # type: ignore[arg-type]
+        default=False,
+        help="Dump boundary NPZ/CSV, write debug figure, and fail-fast on suspicious edges",
+    )
+    s_viz.add_argument(
+        "--edge-length-threshold-deg",
+        type=float,
+        default=1.5,
+        help="Flag edges longer than this threshold in degrees",
+    )
+    s_viz.add_argument(
+        "--include-ibtype",
+        nargs='+',
+        type=int,
+        default=[0, 20, 21],
+        help="IBTYPE values to treat as coastline (fort.14 land boundaries)",
+    )
     # Boolean optional action support (Python >=3.9); fallback to store_true on older/limited argparse
     try:
         BooleanOptionalAction_not_used = None

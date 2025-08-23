@@ -44,6 +44,57 @@ When .14 and .m Names Differ
   - `omt scan --pairs-file pairs.yaml --out catalog.json`
   - Then: `omt viz --fort14 /abs/path/tb_futtsu_5regions.14 --catalog catalog.json --out figs/tb_futtsu_5regions`
 
+What's New
+
+- Fast coastline and open-boundary overlays directly from `fort.14` (mesh14 path):
+  - Reads boundary sections and renders strictly per edge using Matplotlib `LineCollection`.
+  - No accidental concatenation across segments; safeguards and validations added.
+  - Optional debug mode writes NPZ/CSV/PNG artifacts and fail-fast on suspicious edges.
+
+Quick Start: Mesh14 Overlays
+
+```bash
+cd examples
+./run_viz.sh -- --coast-source mesh14 --include-ibtype 0 20 21
+# or manually
+omt viz \
+  --fort14 $HOME/Github/OceanMesh2D/Tokyo_Bay/meshes/NAME.14 \
+  --catalog catalog.json \
+  --coast-source mesh14 \
+  --include-ibtype 0 20 21 \
+  --out figs/NAME
+```
+
+- Outputs:
+  - `mesh.png` with coastline (red) and open boundaries (blue) overlays.
+  - `coastline_overlay.png` showing only coastline (plus optional thin gray shapefile background).
+
+CLI Options (selected)
+
+- `--coast-source {mesh14, mesh, shp}`: coastline source (default: `mesh14`).
+- `--include-ibtype INT...`: land IBTYPEs treated as coastline (default: `0 20 21`).
+- `--mesh-add-coastline` / `--mesh-add-open-boundaries`: enable overlays on `mesh.png` (default: on).
+- `--coast-shp-background PATH`: optional shapefile drawn as thin gray background.
+- `--debug-boundaries` / `--no-debug-boundaries`: write debug artifacts and fail-fast on suspicious edges (default: off).
+- `--edge-length-threshold-deg FLOAT`: flag edges longer than threshold (deg) in debug (default: 1.5).
+- `--progress` is on by default; progress steps print:
+  - `[1/2] Reading fort.14 boundaries ...`
+  - `[2/2] Building polylines ...`
+
+Debugging Boundaries
+
+- With `--debug-boundaries`, the tool writes to your `--out` directory:
+  - `boundary_debug_edges.npz`: nodes, edges, segments, and per-edge lengths.
+  - `boundary_readback.txt`: NOPE/NBOU and NBOB/NBOBN plus a summary of first segments.
+  - `suspicious_coast_edges.csv` / `suspicious_open_edges.csv`: first 200 long edges.
+  - `boundary_debug.png`: highlights suspicious edges.
+- The viz may fail-fast with a clear error when suspicious coastline edges are found.
+
+Performance
+
+- The mesh14 path runs in O(number of boundary nodes), using `LineCollection` to efficiently plot edges.
+- Typical timing is printed in the progress logs.
+
 Notes on DEM Handling
 
 - NetCDF DEMs: If GDAL/`rasterio` cannot open `.nc`, the tool automatically falls back to `xarray` (`ds.to_array().squeeze()`), with a warning: "rasterio could not read NetCDF; falling back to xarray." Rasterio + libgdal-netcdf is optional but recommended for performance.
@@ -95,3 +146,12 @@ See also the quickstart notebook in `notebooks/00_quickstart.ipynb`.
       - `tb_futtsu_5regions.14` → `figs/tb_futtsu_5regions`
       - `tb_uniform_400m.14` → `figs/tb_uniform_400m`
   - Requirements: OceanMesh2D data under `$HOME/Github/OceanMesh2D/Tokyo_Bay/` and `omt` installed (`make install`).
+
+Housekeeping
+
+```bash
+make clean        # untrack generated files (keeps local copies)
+make clean-purge  # also delete generated/debug artifacts in working tree
+```
+
+- Generated artifacts (e.g., `figs/`, `catalog.json`, `pairs.yaml`, and debug dumps) are git-ignored.

@@ -24,7 +24,7 @@ def build_paths_from_segments(nodes_xy: np.ndarray, segments: Iterable[Iterable[
     return out
 
 
-def classify_land_segments(land_segments: List[Tuple[Optional[int], List[int]]], include_ibtype: Tuple[int, ...] = (20, 21)) -> Dict[str, List[List[int]]]:
+def classify_land_segments(land_segments: List[Tuple[Optional[int], List[int]]], include_ibtype: Tuple[int, ...] = (0, 20, 21)) -> Dict[str, List[List[int]]]:
     coast: List[List[int]] = []
     other: List[List[int]] = []
     for ib, seg in land_segments:
@@ -100,3 +100,41 @@ def edges_to_linecollection(
     lc.set_capstyle('round')
     lc.set_joinstyle('round')
     return lc, segs.shape[0]
+
+
+def edges_to_lc(
+    nodes_xy: np.ndarray,
+    edges: np.ndarray,
+    color: str = 'k',
+    zorder: int = 5,
+):
+    """Like edges_to_linecollection but also returns the (M,2,2) segments array for debugging."""
+    if edges.size == 0:
+        return LineCollection([], colors=[color], zorder=zorder), 0, np.empty((0, 2, 2), dtype=float)
+    e = np.asarray(edges, dtype=np.int64)
+    nmax = int(nodes_xy.shape[0])
+    mask = (e[:, 0] >= 0) & (e[:, 1] >= 0) & (e[:, 0] < nmax) & (e[:, 1] < nmax)
+    if not np.all(mask):
+        e = e[mask]
+    if e.size == 0:
+        return LineCollection([], colors=[color], zorder=zorder), 0, np.empty((0, 2, 2), dtype=float)
+    segs = np.stack([nodes_xy[e[:, 0]], nodes_xy[e[:, 1]]], axis=1)
+    lc = LineCollection(segs, colors=[color], linestyles='solid', zorder=zorder)
+    lc.set_capstyle('round')
+    lc.set_joinstyle('round')
+    return lc, segs.shape[0], segs
+
+
+def edge_lengths_deg(segs: np.ndarray) -> np.ndarray:
+    """Compute per-edge lengths in degrees for segments shaped (M,2,2).
+
+    Uses simple Euclidean metric on lon/lat with cos(lat) factor on dlon.
+    """
+    if segs.size == 0:
+        return np.asarray([], dtype=float)
+    d = segs[:, 1, :] - segs[:, 0, :]
+    lat0 = segs[:, 0, 1]
+    # Scale dlon by cos(lat)
+    dlon = d[:, 0] * np.cos(np.deg2rad(lat0))
+    dlat = d[:, 1]
+    return np.hypot(dlon, dlat)

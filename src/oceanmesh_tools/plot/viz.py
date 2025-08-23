@@ -25,13 +25,15 @@ except Exception:  # pragma: no cover
     xr = None
 
 from ..io.fort14 import Fort14, parse_fort14
-from ..io.fort14_boundaries import parse_fort14_boundaries
+from ..io.fort14_boundaries import parse_fort14_boundaries, validate_segments
 from .boundary_fast import (
     build_paths_from_segments,
     classify_land_segments,
     segments_to_linecollection,
     segments_to_edges,
     edges_to_linecollection,
+    edges_to_lc,
+    edge_lengths_deg,
 )
 from ..mesh.boundary import (
     build_edge_counts,
@@ -234,7 +236,9 @@ def plot_mesh(
     coast_subtract_tol: float = 0.002,
     coast_source: str = "mesh14",
     coast_shp_background: Optional[Path] = None,
-    include_ibtype: Tuple[int, ...] = (20, 21),
+    include_ibtype: Tuple[int, ...] = (0, 20, 21),
+    debug_boundaries: bool = False,
+    edge_length_threshold_deg: float = 1.5,
     show_progress: bool = True,
 ) -> Path:
     _ensure_outdir(outdir)
@@ -255,13 +259,88 @@ def plot_mesh(
         with step("[1/2] Reading fort.14 boundaries ...", show_progress):
             b = parse_fort14_boundaries(f14_path)
         with step("[2/2] Building polylines ...", show_progress):
-            # Build edges and render via LineCollections (no concatenation across segments)
+            # Validate and build edges; render via LineCollections (no concatenation across segments)
+            validate_segments(b.nodes_xy, b.open_segments)
+            validate_segments(b.nodes_xy, [seg for _ib, seg in b.land_segments])
             coast_ids = classify_land_segments(b.land_segments, include_ibtype=include_ibtype).get('coast', [])
             open_edges = segments_to_edges(b.open_segments)
             coast_edges = segments_to_edges(coast_ids)
-            lc_red, n_red = edges_to_linecollection(b.nodes_xy, coast_edges, color='r', zorder=5)
-            lc_blue, n_blue = edges_to_linecollection(b.nodes_xy, open_edges, color='b', zorder=6)
-            print(f"[coast/open edges] red={n_red}, blue={n_blue}")
+            lc_red, n_red, red_segs = edges_to_lc(b.nodes_xy, coast_edges, color='r', zorder=5)
+            lc_blue, n_blue, blue_segs = edges_to_lc(b.nodes_xy, open_edges, color='b', zorder=6)
+            ax.add_collection(lc_red)
+            ax.add_collection(lc_blue)
+            ax.autoscale_view()
+            print(f"[boundaries] coast-source=mesh14; land_segments={len(coast_ids)} (edges={n_red}), open_segments={len(b.open_segments)} (edges={n_blue}); nodes={len(b.nodes_xy)}")
+            if debug_boundaries:
+                # Write readback report
+                try:
+                    rb = outdir / 'boundary_readback.txt'
+                    with open(rb, 'w', encoding='utf-8') as fh:
+                        fh.write(f"NOPE={b.meta.get('NOPE')} NBOU={b.meta.get('NBOU')} NBOB={b.meta.get('NBOB')} NBOBN={b.meta.get('NBOBN')}\n")
+                        fh.write("Open boundaries (first 10):\n")
+                        for i, seg in enumerate(b.open_segments[:10]):
+                            head = seg[:5]
+                            tail = seg[-5:] if len(seg) > 5 else []
+                            fh.write(f"  k={i} m={len(seg)} head={head} tail={tail}\n")
+                        fh.write("Land boundaries (first 10):\n")
+                        for i, (ib, seg) in enumerate(b.land_segments[:10]):
+                            head = seg[:5]
+                            tail = seg[-5:] if len(seg) > 5 else []
+                            fh.write(f"  k={i} m={len(seg)} ibtype={ib} head={head} tail={tail}\n")
+                except Exception:
+                    pass
+            # --- Suspicious-edge detector and dumps ---
+            import os, csv
+            red_len = edge_lengths_deg(red_segs) if n_red else np.array([])
+            blue_len = edge_lengths_deg(blue_segs) if n_blue else np.array([])
+            LTH = float(edge_length_threshold_deg)
+            suspicious_red_idx = np.where(red_len > LTH)[0]
+            suspicious_blue_idx = np.where(blue_len > LTH)[0]
+            os.makedirs(outdir, exist_ok=True)
+            np.savez(
+                os.path.join(outdir, 'boundary_debug_edges.npz'),
+                nodes_xy=b.nodes_xy,
+                land_edges=coast_edges,
+                open_edges=open_edges,
+                land_segs=red_segs,
+                open_segs=blue_segs,
+                red_len=red_len,
+                blue_len=blue_len,
+            )
+            def dump_csv(path, segs, lens, idx, kind: str):
+                k = min(200, len(idx))
+                if k <= 0:
+                    return
+                with open(path, 'w', newline='') as f:
+                    w = csv.writer(f)
+                    w.writerow(['kind','edge_index','lon0','lat0','lon1','lat1','length_deg'])
+                    for j in idx[:k]:
+                        x0, y0 = segs[j, 0]
+                        x1, y1 = segs[j, 1]
+                        w.writerow([kind, int(j), float(x0), float(y0), float(x1), float(y1), float(lens[j])])
+            if len(suspicious_red_idx):
+                dump_csv(os.path.join(outdir, 'suspicious_coast_edges.csv'), red_segs, red_len, suspicious_red_idx, 'coast')
+            if len(suspicious_blue_idx):
+                dump_csv(os.path.join(outdir, 'suspicious_open_edges.csv'), blue_segs, blue_len, suspicious_blue_idx, 'open')
+            # Optional: debug figure highlighting outliers
+            if debug_boundaries:
+                from matplotlib.collections import LineCollection as _LC
+                figd, ax2 = plt.subplots(figsize=(8, 6))
+                ax2.add_collection(_LC(red_segs, colors='r', linewidths=1, linestyles='solid', zorder=2))
+                ax2.add_collection(_LC(blue_segs, colors='b', linewidths=1, linestyles='solid', zorder=3))
+                if len(suspicious_red_idx):
+                    ax2.add_collection(_LC(red_segs[suspicious_red_idx], colors='m', linewidths=2.0, zorder=4))
+                if len(suspicious_blue_idx):
+                    ax2.add_collection(_LC(blue_segs[suspicious_blue_idx], colors='c', linewidths=2.0, zorder=5))
+                ax2.autoscale_view()
+                ax2.set_title('Boundary Debug (magenta=coast outliers)')
+                figd.savefig(outdir / 'boundary_debug.png', dpi=160)
+                plt.close(figd)
+                # Fail fast if any suspicious coast edges
+                if len(suspicious_red_idx):
+                    raise RuntimeError(
+                        f"Suspicious coast edges found: {len(suspicious_red_idx)} (> {LTH} deg). See boundary_debug.png and CSV/NPZ dumps in {outdir}"
+                    )
         # Also set mesh, xs, ys from nodes for drawing elements
         xs = {i + 1: float(b.nodes_xy[i, 0]) for i in range(b.nodes_xy.shape[0])}
         ys = {i + 1: float(b.nodes_xy[i, 1]) for i in range(b.nodes_xy.shape[0])}
@@ -316,10 +395,9 @@ def plot_mesh(
 
     if mesh_add_coastline and coast_source in ("mesh", "mesh14"):
         # Draw coastline/open using LineCollections in mesh14 mode; mesh mode uses path plotting
-        if coast_source == "mesh14" and 'b' in locals():
-            ax.add_collection(lc_red)
-            ax.add_collection(lc_blue)
-            ax.autoscale_view()
+        if coast_source == "mesh14":
+            # Already added in branch above
+            pass
         else:
             for arr in coast_paths_xy:
                 if isinstance(arr, np.ndarray) and arr.ndim == 2 and arr.shape[0] >= 2:
@@ -834,6 +912,9 @@ def plot_coastline_overlay(
     coast_subtract_tol: float = 0.002,
     coast_source: str = "mesh",
     coast_shp_background: Optional[Path] = None,
+    include_ibtype: Tuple[int, ...] = (20, 21),
+    debug_boundaries: bool = False,
+    edge_length_threshold_deg: float = 1.5,
 ) -> Path:
     if gpd is None:
         raise RuntimeError("geopandas is required to plot coastline overlay")
@@ -843,15 +924,86 @@ def plot_coastline_overlay(
         fig, ax = plt.subplots(figsize=(8, 6), dpi=150)
         if coast_source == "mesh14":
             b = parse_fort14_boundaries(fort14_path)
-            coast_ids = classify_land_segments(b.land_segments).get('coast', [])
+            # Validate and build edges
+            validate_segments(b.nodes_xy, b.open_segments)
+            validate_segments(b.nodes_xy, [seg for _ib, seg in b.land_segments])
+            coast_ids = classify_land_segments(b.land_segments, include_ibtype=include_ibtype).get('coast', [])
             open_edges = segments_to_edges(b.open_segments)
             coast_edges = segments_to_edges(coast_ids)
-            lc_red, n_red = edges_to_linecollection(b.nodes_xy, coast_edges, color='C0', zorder=2)
+            lc_red, n_red, red_segs = edges_to_lc(b.nodes_xy, coast_edges, color='C0', zorder=2)
             ax.add_collection(lc_red)
-            lc_blue, n_blue = edges_to_linecollection(b.nodes_xy, open_edges, color='b', zorder=3)
+            lc_blue, n_blue, blue_segs = edges_to_lc(b.nodes_xy, open_edges, color='b', zorder=3)
             ax.add_collection(lc_blue)
-            print(f"[coast/open edges overlay] red={n_red}, blue={n_blue}")
+            print(f"[boundaries overlay] coast-source=mesh14; land_segments={len(coast_ids)} (edges={n_red}), open_segments={len(b.open_segments)} (edges={n_blue})")
             ax.autoscale_view()
+            if debug_boundaries:
+                # Write readback summary
+                try:
+                    rb = outdir / 'boundary_readback.txt'
+                    with open(rb, 'w', encoding='utf-8') as fh:
+                        fh.write(f"NOPE={b.meta.get('NOPE')} NBOU={b.meta.get('NBOU')} NBOB={b.meta.get('NBOB')} NBOBN={b.meta.get('NBOBN')}\n")
+                        fh.write("Open boundaries (first 10):\n")
+                        for i, seg in enumerate(b.open_segments[:10]):
+                            head = seg[:5]
+                            tail = seg[-5:] if len(seg) > 5 else []
+                            fh.write(f"  k={i} m={len(seg)} head={head} tail={tail}\n")
+                        fh.write("Land boundaries (first 10):\n")
+                        for i, (ib, seg) in enumerate(b.land_segments[:10]):
+                            head = seg[:5]
+                            tail = seg[-5:] if len(seg) > 5 else []
+                            fh.write(f"  k={i} m={len(seg)} ibtype={ib} head={head} tail={tail}\n")
+                except Exception:
+                    pass
+            # Debug dumps
+            import os, csv
+            red_len = edge_lengths_deg(red_segs) if n_red else np.array([])
+            blue_len = edge_lengths_deg(blue_segs) if n_blue else np.array([])
+            LTH = float(edge_length_threshold_deg)
+            suspicious_red_idx = np.where(red_len > LTH)[0]
+            suspicious_blue_idx = np.where(blue_len > LTH)[0]
+            os.makedirs(outdir, exist_ok=True)
+            np.savez(
+                os.path.join(outdir, 'boundary_debug_edges.npz'),
+                nodes_xy=b.nodes_xy,
+                land_edges=coast_edges,
+                open_edges=open_edges,
+                land_segs=red_segs,
+                open_segs=blue_segs,
+                red_len=red_len,
+                blue_len=blue_len,
+            )
+            def dump_csv(path, segs, lens, idx, kind: str):
+                k = min(200, len(idx))
+                if k <= 0:
+                    return
+                with open(path, 'w', newline='') as f:
+                    w = csv.writer(f)
+                    w.writerow(['kind','edge_index','lon0','lat0','lon1','lat1','length_deg'])
+                    for j in idx[:k]:
+                        x0, y0 = segs[j, 0]
+                        x1, y1 = segs[j, 1]
+                        w.writerow([kind, int(j), float(x0), float(y0), float(x1), float(y1), float(lens[j])])
+            if len(suspicious_red_idx):
+                dump_csv(os.path.join(outdir, 'suspicious_coast_edges.csv'), red_segs, red_len, suspicious_red_idx, 'coast')
+            if len(suspicious_blue_idx):
+                dump_csv(os.path.join(outdir, 'suspicious_open_edges.csv'), blue_segs, blue_len, suspicious_blue_idx, 'open')
+            if debug_boundaries:
+                from matplotlib.collections import LineCollection as _LC
+                figd, ax2 = plt.subplots(figsize=(8, 6))
+                ax2.add_collection(_LC(red_segs, colors='C0', linewidths=1, linestyles='solid', zorder=2))
+                ax2.add_collection(_LC(blue_segs, colors='b', linewidths=1, linestyles='solid', zorder=3))
+                if len(suspicious_red_idx):
+                    ax2.add_collection(_LC(red_segs[suspicious_red_idx], colors='m', linewidths=2.0, zorder=4))
+                if len(suspicious_blue_idx):
+                    ax2.add_collection(_LC(blue_segs[suspicious_blue_idx], colors='c', linewidths=2.0, zorder=5))
+                ax2.autoscale_view()
+                ax2.set_title('Boundary Debug (magenta=coast outliers)')
+                figd.savefig(outdir / 'boundary_debug.png', dpi=160)
+                plt.close(figd)
+                if len(suspicious_red_idx):
+                    raise RuntimeError(
+                        f"Suspicious coast edges found: {len(suspicious_red_idx)} (> {LTH} deg). See boundary_debug.png and CSV/NPZ dumps in {outdir}"
+                    )
         else:
             m = parse_fort14(fort14_path)
             coast_paths = _compute_mesh_boundary_xy_paths(m)[1]

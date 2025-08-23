@@ -212,3 +212,21 @@ examples/**/pairs.yaml
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# ---- OceanMesh Tools generated ----
+# (some entries may already exist above; duplicates are harmless)
+figs/
+**/figs/
+catalog.json
+pairs.yaml
+examples/catalog.json
+examples/pairs.yaml
+examples/**/figs/
+
+# ---- Debug dumps ----
+**/boundary_debug_edges.npz
+**/boundary_readback.txt
+**/suspicious_coast_edges.csv
+**/suspicious_open_edges.csv
+**/boundary_debug.png
+**/*.boundary.npz
