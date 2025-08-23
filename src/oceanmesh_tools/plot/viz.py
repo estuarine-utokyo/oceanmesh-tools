@@ -426,7 +426,7 @@ def plot_coastline_overlay(
     shp_path: Path,
     mesh_bbox: Tuple[float, float, float, float],
     outdir: Path,
-    include_holes: bool = False,
+    include_holes: bool = True,
     target_crs: Optional[str] = None,
 ) -> Path:
     if gpd is None:

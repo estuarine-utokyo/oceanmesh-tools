@@ -516,7 +516,7 @@ def build_parser() -> argparse.ArgumentParser:
     s_viz.add_argument(
         "--coast-include-holes",
         action="store_true",
-        default=False,
+        default=True,
         help="Include interior rings (holes) from polygons when plotting coastlines",
     )
     s_viz.add_argument("--out", help="Output directory for figures")
