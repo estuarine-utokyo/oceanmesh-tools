@@ -112,6 +112,52 @@ def _filter_coast_rings_near_openbnd(rings: List[List[Tuple[float, float]]], ope
     return out
 
 
+def _subtract_near_openbnd(rings: List[List[Tuple[float, float]]], eraser) -> List[List[Tuple[float, float]]]:
+    """Subtract an eraser polygon around open boundaries from each coastline ring.
+
+    Returns a list of coordinate sequences (LineString segments) after subtraction.
+    If shapely is unavailable or eraser is None, returns rings unchanged.
+    """
+    try:
+        from shapely.geometry import LineString  # type: ignore
+    except Exception:  # pragma: no cover
+        return rings
+    if eraser is None:
+        return rings
+    out: List[List[Tuple[float, float]]] = []
+    for r in rings:
+        if not r:
+            continue
+        try:
+            ln = LineString(r)
+        except Exception:
+            continue
+        kept = ln
+        if getattr(ln, "is_valid", False):
+            try:
+                kept = ln.difference(eraser)
+            except Exception:
+                kept = ln
+        if getattr(kept, "is_empty", False):
+            continue
+        # Explode to LineStrings
+        geoms = []
+        if kept.geom_type == "LineString":
+            geoms = [kept]
+        else:
+            for g in getattr(kept, "geoms", []):
+                if getattr(g, "geom_type", "") == "LineString" and not getattr(g, "is_empty", False):
+                    geoms.append(g)
+        for g in geoms:
+            try:
+                coords = list(g.coords)
+            except Exception:
+                continue
+            if len(coords) >= 2:
+                out.append([(float(x), float(y)) for (x, y) in coords])
+    return out
+
+
 def _ensure_outdir(outdir: Path) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -166,8 +212,13 @@ def plot_mesh(
                 for s in segs:
                     if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
                         rings.append([(float(x), float(y)) for x, y in s[:, :2]])
+                # Apply subtraction near open boundary rather than dropping the entire ring
                 if coast_skip_near_openbnd and openbnd_ml is not None:
-                    rings = _filter_coast_rings_near_openbnd(rings, openbnd_ml, coast_skip_tol)
+                    try:
+                        eraser = openbnd_ml.buffer(coast_skip_tol, cap_style=2, join_style=2)  # type: ignore
+                    except Exception:
+                        eraser = None
+                    rings = _subtract_near_openbnd(rings, eraser)
                 for coords in rings:
                     arr = np.asarray(coords)
                     ax.plot(arr[:, 0], arr[:, 1], color="r", linestyle="-", zorder=5, solid_joinstyle='round', solid_capstyle='round')
