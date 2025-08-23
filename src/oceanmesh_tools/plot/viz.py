@@ -89,6 +89,29 @@ def _build_open_boundary_segments(mesh: Fort14) -> List[np.ndarray]:
     return segments
 
 
+def _filter_coast_rings_near_openbnd(rings: List[List[Tuple[float, float]]], openbnd_ml, tol: float) -> List[List[Tuple[float, float]]]:
+    """Return rings excluding those closer than tol to the open-boundary MultiLine.
+
+    If shapely is not available or openbnd_ml is None, returns rings unchanged.
+    """
+    try:
+        from shapely.geometry import LineString  # type: ignore
+    except Exception:  # pragma: no cover
+        return rings
+    if openbnd_ml is None:
+        return rings
+    out: List[List[Tuple[float, float]]] = []
+    for r in rings:
+        try:
+            ln = LineString(r)
+            if ln.is_valid and openbnd_ml.distance(ln) < tol:
+                continue
+        except Exception:
+            pass
+        out.append(r)
+    return out
+
+
 def _ensure_outdir(outdir: Path) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -101,6 +124,8 @@ def plot_mesh(
     mesh_add_open_boundaries: bool = True,
     include_holes: bool = True,
     target_crs: Optional[str] = None,
+    coast_skip_near_openbnd: bool = True,
+    coast_skip_tol: float = 0.01,
 ) -> Path:
     _ensure_outdir(outdir)
     mesh = parse_fort14(f14_path)
@@ -112,6 +137,18 @@ def plot_mesh(
         ax.plot([xs[n2], xs[n3]], [ys[n2], ys[n3]], color="k", linewidth=0.2)
         ax.plot([xs[n3], xs[n1]], [ys[n3], ys[n1]], color="k", linewidth=0.2)
     # Optional overlays
+    openbnd_paths: List[np.ndarray] = []
+    if mesh_add_open_boundaries and mesh.open_boundaries:
+        openbnd_paths = _build_open_boundary_segments(mesh)
+    openbnd_ml = None
+    if openbnd_paths:
+        try:
+            from shapely.geometry import LineString  # type: ignore
+            from shapely.ops import unary_union  # type: ignore
+            openbnd_ml = unary_union([LineString(p[:, :2]) for p in openbnd_paths if isinstance(p, np.ndarray) and p.shape[1] >= 2])
+        except Exception:
+            openbnd_ml = None
+
     if mesh_add_coastline and coastline_path is not None and coastline_path.exists():
         if gpd is not None:
             try:
@@ -123,19 +160,24 @@ def plot_mesh(
                         gdf = gdf.to_crs(epsg=4326)  # type: ignore
                 except Exception:
                     pass
-                # Plot each ring separately in red
+                # Build ring coords, filter near open boundary if requested, then plot
                 segs = _segments_from_geoms(gdf.geometry, include_holes=include_holes)  # type: ignore
+                rings: List[List[Tuple[float, float]]] = []
                 for s in segs:
                     if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
-                        ax.plot(s[:, 0], s[:, 1], color="r", linestyle="-", zorder=5)
+                        rings.append([(float(x), float(y)) for x, y in s[:, :2]])
+                if coast_skip_near_openbnd and openbnd_ml is not None:
+                    rings = _filter_coast_rings_near_openbnd(rings, openbnd_ml, coast_skip_tol)
+                for coords in rings:
+                    arr = np.asarray(coords)
+                    ax.plot(arr[:, 0], arr[:, 1], color="r", linestyle="-", zorder=5, solid_joinstyle='round', solid_capstyle='round')
             except Exception:
                 pass
         # If geopandas unavailable, silently skip coastline overlay
-    if mesh_add_open_boundaries and mesh.open_boundaries:
-        segs = _build_open_boundary_segments(mesh)
-        for s in segs:
+    if mesh_add_open_boundaries and openbnd_paths:
+        for s in openbnd_paths:
             if isinstance(s, np.ndarray) and s.ndim == 2 and s.shape[0] >= 2:
-                ax.plot(s[:, 0], s[:, 1], color="b", linestyle="-", zorder=6)
+                ax.plot(s[:, 0], s[:, 1], color="b", linestyle="-", zorder=6, solid_joinstyle='round', solid_capstyle='round')
     ax.set_title("Mesh")
     ax.set_xlabel("Lon/X")
     ax.set_ylabel("Lat/Y")

@@ -450,6 +450,8 @@ def cmd_viz(args: argparse.Namespace) -> int:
         mesh_add_open_boundaries=add_open,
         include_holes=getattr(args, "coast_include_holes", True),
         target_crs=getattr(args, "crs", None),
+        coast_skip_near_openbnd=getattr(args, "coast_skip_near_openbnd", True),
+        coast_skip_tol=getattr(args, "coast_skip_tol", 0.01),
     )
     ob_png = plot_open_boundaries(fort14, outdir)
     if dem_path and dem_path.exists():
@@ -553,6 +555,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--mesh-add-all",
         action="store_true",
         help="Shorthand to enable both coastline and open-boundary overlays",
+    )
+    s_viz.add_argument(
+        "--coast-skip-near-openbnd",
+        action=bool_action,  # type: ignore[arg-type]
+        default=True,
+        help="Skip coastline rings that lie within tolerance of open boundary when overlaying on mesh",
+    )
+    s_viz.add_argument(
+        "--coast-skip-tol",
+        type=float,
+        default=0.01,
+        help="Tolerance in mesh CRS units for coastline-vs-open-boundary proximity filter",
     )
     s_viz.add_argument("--out", help="Output directory for figures")
     s_viz.add_argument("--crs", help="Target CRS like EPSG:4326", default="EPSG:4326")
