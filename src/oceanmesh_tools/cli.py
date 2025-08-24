@@ -576,6 +576,18 @@ def build_parser() -> argparse.ArgumentParser:
     s_viz.add_argument("--fort14", required=True, help="Path to fort.14 file")
     s_viz.add_argument("--catalog", help="Path to catalog.json from scan")
     s_viz.add_argument("--script", help="Path to generating MATLAB script (.m)")
+    # Figure selection and DPI
+    s_viz.add_argument(
+        "--figs",
+        nargs='+',
+        choices=["mesh", "coastline", "openboundaries"],
+        help="Select which figures to render (one or more)",
+    )
+    s_viz.add_argument(
+        "--dpi",
+        type=int,
+        help="Save DPI for raster outputs (e.g., mesh.png)",
+    )
     # DEM opt-in (default off). BooleanOptionalAction provides --dem / --no-dem
     s_viz.add_argument("--dem", dest="dem", action=BoolAction, default=False, help="Enable DEM underlay/plots (default: off)")
     s_viz.add_argument("--shp", help="Shapefile path/dir or 'auto'", default="auto")
