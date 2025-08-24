@@ -7,6 +7,7 @@ dependencies:
 
   # Core plotting
   - matplotlib>=3.8
+  - plotly
 
   # Geospatial stack (condaで入れるのが安定)
   - shapely>=2.0
@@ -25,4 +26,3 @@ dependencies:
   # CLI/Dev (任意)
   - pip:
       - pytest>=7.4
-

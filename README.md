@@ -190,3 +190,70 @@ Defaults
 - DEM is off by default; enable with `--dem` (or `--with-dem` in the example script).
 
 Note: The example runner now uses a direct Python driver to render only the requested figures (faster, no warnings). It still uses `omt scan` to build `catalog.json` for convenience.
+
+## Interactive FVCOM Mesh Viewer (Plotly)
+
+- Features:
+  - Pan/zoom in browser, no server required.
+  - Hover shows 1-based IDs: `node: <id>`; enable legend item to hover `elem: <id>` on centroids.
+  - Fast rendering via Plotly Scattergl; standalone HTML with Plotly CDN.
+
+- Install:
+  - `pip install -e .[viz]`
+  - Or conda/mamba: `mamba env update -f environment.yml` (adds `plotly`, `numpy`).
+
+- Usage:
+  - `./examples/run_mesh_interactive.sh`  # uses DEFAULT_MESH or auto-search
+  - `./examples/run_mesh_interactive.sh /path/to/mesh.14`
+  - `./examples/run_mesh_interactive.sh /path/to/mesh.14 ./outputs/my_view.html`
+
+- Notes:
+  - You can set `DEFAULT_MESH` at the top of the script or via environment variable when invoking it.
+- Consider ignoring generated HTML (e.g., add `*.interactive.html` to `.gitignore`).
+
+## Interactive FVCOM Mesh Viewer (Plotly)
+
+- Standalone HTML with pan/zoom, hover 1-based node/element IDs, legend toggle for element centroids.
+- Output location matches `run_viz.sh`: under this repository → `examples/figs/<meshname>/<meshname>.interactive.html`.
+
+### Installation
+```bash
+pip install -e .[viz]     # uses optional "viz" extra (plotly+numpy)
+# or:
+mamba env update -f environment.yml
+```
+
+### Usage
+```bash
+./examples/run_mesh_interactive.sh    # zero-arg default (uses DEFAULT_MESH or auto-search)
+```
+
+- The HTML is self-contained (embeds plotly.js) and opens offline.
+- Debug and fallback:
+  - `DEBUG=1 ./examples/run_mesh_interactive.sh` prints counts and ranges.
+  - `NO_WEBGL=1 ./examples/run_mesh_interactive.sh` uses non-WebGL (SVG) rendering.
+- Consider ignoring generated HTML (e.g., add `*.interactive.html` to `.gitignore`).
+
+## fort.14 Interactive Viewer (official tool)
+
+A lightweight Plotly-based viewer for ADCIRC fort.14 meshes.
+
+### Install
+```bash
+pip install -e .[viz]
+# or with conda/mamba, ensure plotly and numpy are available
+```
+
+### CLI
+```bash
+omesh14-view /path/to/mesh.14 \
+  --out figs/NAME/NAME.interactive.html \
+  --title "My Mesh" \
+  --bbox 139.6 140.2 35.2 35.7 \
+  --debug
+
+# Fallback if not installed as a script
+python -m oceanmesh_tools.vis.interactive_mesh /path/to/mesh.14 --out out.html
+```
+
+- Examples directory contains convenience wrappers only; the official tool lives under `oceanmesh_tools.vis`.

@@ -212,6 +212,7 @@ examples/**/pairs.yaml
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+*.interactive.html
 
 # ---- OceanMesh Tools generated ----
 # (some entries may already exist above; duplicates are harmless)

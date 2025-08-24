@@ -24,9 +24,14 @@ geo = [
   "hvplot>=0.9",
 ]
 test = ["pytest>=7.4"]
+viz = [
+  "plotly>=5.15",
+  "numpy>=1.23",
+]
 
 [project.scripts]
 omt = "oceanmesh_tools.cli:main"
+omesh14-view = "oceanmesh_tools.vis.interactive_mesh:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
