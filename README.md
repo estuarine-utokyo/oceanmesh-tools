@@ -195,21 +195,25 @@ Note: The example runner now uses a direct Python driver to render only the requ
 
 - Features:
   - Pan/zoom in browser, no server required.
-  - Hover shows 1-based IDs: `node: <id>`; enable legend item to hover `elem: <id>` on centroids.
-  - Fast rendering via Plotly Scattergl; standalone HTML with Plotly CDN.
+  - Hover shows 1-based IDs: `node: <id>`; element centroids show `elem: <id>`.
+  - Fast rendering via Plotly Scattergl; standalone HTML embeds plotly.js (offline).
 
 - Install:
   - `pip install -e .[viz]`
   - Or conda/mamba: `mamba env update -f environment.yml` (adds `plotly`, `numpy`).
 
-- Usage:
-  - `./examples/run_mesh_interactive.sh`  # uses DEFAULT_MESH or auto-search
+- CLI (recommended):
+  - `omesh14-view /path/to/mesh.14 --out figs/NAME/NAME.interactive.html`
+  - Fallback: `python -m oceanmesh_tools.vis.interactive_mesh /path/to/mesh.14 --out out.html`
+
+- Example wrapper:
+  - `./examples/run_mesh_interactive.sh`  # zero-arg default (uses DEFAULT_MESH or auto-search)
   - `./examples/run_mesh_interactive.sh /path/to/mesh.14`
   - `./examples/run_mesh_interactive.sh /path/to/mesh.14 ./outputs/my_view.html`
 
 - Notes:
   - You can set `DEFAULT_MESH` at the top of the script or via environment variable when invoking it.
-- Consider ignoring generated HTML (e.g., add `*.interactive.html` to `.gitignore`).
+  - Consider ignoring generated HTML (e.g., add `*.interactive.html` to `.gitignore`).
 
 ## Interactive FVCOM Mesh Viewer (Plotly)
 
