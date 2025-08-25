@@ -292,6 +292,45 @@ def build_overlay_traces(
     return traces
 
 
+def apply_latlon_grid(fig, args):
+    """
+    Configure x/y axes to show a light, unobtrusive lat/lon grid.
+    Grid adapts to zoom/pan; labels show degree suffixes.
+    """
+    if getattr(args, "no_grid", False):
+        fig.update_xaxes(showgrid=False, zeroline=False)
+        fig.update_yaxes(showgrid=False, zeroline=False)
+        return
+
+    # Subtle grid; below traces; no zero lines
+    gridcolor = "rgba(0,0,0,0.12)"
+    fig.update_xaxes(
+        showgrid=True,
+        gridcolor=gridcolor,
+        gridwidth=0.5,
+        zeroline=False,
+        ticks="outside",
+        ticklen=3,
+        tickcolor="rgba(0,0,0,0.2)",
+        ticksuffix="°E",
+    )
+    fig.update_yaxes(
+        showgrid=True,
+        gridcolor=gridcolor,
+        gridwidth=0.5,
+        zeroline=False,
+        ticks="outside",
+        ticklen=3,
+        tickcolor="rgba(0,0,0,0.2)",
+        ticksuffix="°N",
+        scaleanchor="x",  # keep aspect ratio if not already set elsewhere
+        scaleratio=1.0,
+    )
+
+    # Keep a clean background to make grid unobtrusive
+    fig.update_layout(plot_bgcolor="white")
+
+
 def plot_mesh_interactive(
     nodes: np.ndarray,
     elems: np.ndarray,
@@ -387,6 +426,8 @@ def main():
     ap.add_argument("--coast-width", type=float, default=None)
     ap.add_argument("--openbdy-width", type=float, default=None)
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    ap.add_argument("--no-grid", action="store_true",
+                    help="Disable background lat/lon grid (default: grid shown)")
     args = ap.parse_args()
 
     nodes, elems = parse_fvcom_14(args.mesh14)
@@ -495,6 +536,9 @@ def main():
             xaxis=dict(range=[xmin, xmax], scaleanchor="y", scaleratio=1, title="x", zeroline=False),
             yaxis=dict(range=[ymin, ymax], title="y", zeroline=False),
         )
+
+    # Apply subtle lat/lon grid (default ON; user can disable with --no-grid)
+    apply_latlon_grid(fig, args)
 
     outpath = args.out or Path("mesh_interactive.html")
     # Embed plotly.js to avoid CDN/network dependency
